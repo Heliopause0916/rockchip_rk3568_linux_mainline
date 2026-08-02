@@ -1,6 +1,7 @@
 #!/bin/bash
 
 ARCHIVE_DIR="archives"
+mkdir -p archives
 WORKDIR="$(pwd)"
 
 UBOOT_VERSION="u-boot-2023.04"
@@ -12,7 +13,7 @@ KERNEL_ARCHIVE="${KERNEL_VERSION}.tar.xz"
 UBOOT_SITE="https://ftp.denx.de/pub/u-boot/${UBOOT_ARCHIVE}"
 KERNEL_SITE="https://cdn.kernel.org/pub/linux/kernel/v6.x/${KERNEL_ARCHIVE}"
 
-JOBS="4"
+JOBS="$(nproc)"
 
 export ROCKCHIP_TPL="${WORKDIR}/rkbin/bin/rk35/rk3568_ddr_1332MHz_v1.21.bin"
 export BL31="${WORKDIR}/rkbin/bin/rk35/rk3568_bl31_v1.44.elf"
@@ -30,7 +31,7 @@ if [ ! -d "u-boot" ]; then
     mv "${UBOOT_VERSION}" u-boot
 
     cd "${WORKDIR}/u-boot"
-    for i in "${WORKDIR}/patches/u-boot/"*; do patch -p1 < "${i}"; done
+    for i in "${WORKDIR}/patches/u-boot/"*; do patch -Np1 < "${i}"; done
     cd "${WORKDIR}"
 fi
 
@@ -73,7 +74,14 @@ make O=build modules_install INSTALL_MOD_PATH="${WORKDIR}/kernel/deploy/modules"
 tar --owner=0 --group=0 --xform s:'^./':: -czf deploy/kmods.tar.gz -C "${WORKDIR}/kernel/deploy/modules" .
 cd "${WORKDIR}"
 
+mkdir -p deploy
 mkimage -A arm -O linux -T script -C none -a 0 -e 0 -d scripts/photonicat.bootscript deploy/boot.scr
+
+cp -v u-boot/deploy/idbloader.img deploy/
+cp -v u-boot/deploy/u-boot.itb deploy/
+cp -v kernel/deploy/Image deploy/
+cp -v kernel/deploy/rk3568-photonicat.dtb deploy/
+cp -v kernel/deploy/kmods.tar.gz deploy/
 
 echo "Base system builds completed."
 #dd if=idbloader.img of=/dev/mmcblk0 seek=64 conv=notrunc
