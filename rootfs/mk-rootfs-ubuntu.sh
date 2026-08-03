@@ -20,6 +20,19 @@ if [ $(id -u) != "0" ]; then
     exit 1
 fi
 
+# 确保 chroot 失败时卸载挂载
+cleanup_rootfs_mounts() {
+    umount -l "${ROOTFS_MINIMAL_DIR}/dev/shm" 2>/dev/null || true
+    umount -l "${ROOTFS_MINIMAL_DIR}/dev/pts" 2>/dev/null || true
+    umount -l "${ROOTFS_MINIMAL_DIR}/dev" 2>/dev/null || true
+    umount -l "${ROOTFS_MINIMAL_DIR}/proc" 2>/dev/null || true
+    umount -l "${ROOTFS_FULL_DIR}/dev/shm" 2>/dev/null || true
+    umount -l "${ROOTFS_FULL_DIR}/dev/pts" 2>/dev/null || true
+    umount -l "${ROOTFS_FULL_DIR}/dev" 2>/dev/null || true
+    umount -l "${ROOTFS_FULL_DIR}/proc" 2>/dev/null || true
+}
+trap cleanup_rootfs_mounts EXIT
+
 if [ ! -f "${ROOTFS_BASE_ARCHIVE}" ]; then
     echo "No base rootfs found, start building..."
     debootstrap --arch=arm64 --include="${PREINSTALL_PACKAGES}" "${DEB_DISTRO}" "${ROOTFS_DIR}" "${DEB_REPO}"
@@ -44,10 +57,12 @@ if [ ! -f "${ROOTFS_MINIMAL_ARCHIVE}" ]; then
     rm -f "${ROOTFS_MINIMAL_DIR}/etc/resolv.conf"
     cp /etc/resolv.conf "${ROOTFS_MINIMAL_DIR}/etc/resolv.conf"
 
-    mount --bind /dev "${ROOTFS_MINIMAL_DIR}/dev"
-    mount --bind /proc "${ROOTFS_MINIMAL_DIR}/proc"
+    mount -t devtmpfs devtmpfs "${ROOTFS_MINIMAL_DIR}/dev"
+    mount -t devpts devpts "${ROOTFS_MINIMAL_DIR}/dev/pts"
+    mount -t tmpfs tmpfs "${ROOTFS_MINIMAL_DIR}/dev/shm"
+    mount -t proc proc "${ROOTFS_MINIMAL_DIR}/proc"
 
-    cat << EOF | chroot "${ROOTFS_MINIMAL_DIR}"
+    cat << EOF | chroot "${ROOTFS_MINIMAL_DIR}" /bin/bash
 
 rm -rf /debootstrap || true
 
@@ -95,10 +110,10 @@ ln -sf ../run/NetworkManager/resolv.conf /etc/resolv.conf
 
 EOF
 
-    umount -f "${ROOTFS_MINIMAL_DIR}/dev"
-    umount -f "${ROOTFS_MINIMAL_DIR}/proc"
+    umount -l "${ROOTFS_MINIMAL_DIR}/dev"
+    umount -l "${ROOTFS_MINIMAL_DIR}/proc"
 
-    tar --xform s:'^./':: -czpf "${ROOTFS_MINIMAL_ARCHIVE}" --xattrs -C "${ROOTFS_MINIMAL_DIR}" .
+    tar --xform s:'^./':: -czpf "${ROOTFS_MINIMAL_ARCHIVE}" --exclude="proc/*" --exclude="dev/*" --exclude="sys/*" --exclude="run/*" --xattrs -C "${ROOTFS_MINIMAL_DIR}" .
     echo "rootfs-minimal building completed."
 fi
 
@@ -114,10 +129,12 @@ if [ ! -f "${ROOTFS_FULL_ARCHIVE}" ]; then
     rm -f "${ROOTFS_FULL_DIR}/etc/resolv.conf"
     cp /etc/resolv.conf "${ROOTFS_FULL_DIR}/etc/resolv.conf"
 
-    mount --bind /dev "${ROOTFS_FULL_DIR}/dev"
-    mount --bind /proc "${ROOTFS_FULL_DIR}/proc"
+    mount -t devtmpfs devtmpfs "${ROOTFS_FULL_DIR}/dev"
+    mount -t devpts devpts "${ROOTFS_FULL_DIR}/dev/pts"
+    mount -t tmpfs tmpfs "${ROOTFS_FULL_DIR}/dev/shm"
+    mount -t proc proc "${ROOTFS_FULL_DIR}/proc"
 
-    cat << EOF | chroot "${ROOTFS_FULL_DIR}"
+    cat << EOF | chroot "${ROOTFS_FULL_DIR}" /bin/bash
 
 export DEBIAN_FRONTEND=noninteractive
 export LANG=en_US.UTF-8
@@ -140,9 +157,9 @@ ln -sf ../run/NetworkManager/resolv.conf /etc/resolv.conf
 
 EOF
 
-    umount -f "${ROOTFS_FULL_DIR}/dev"
-    umount -f "${ROOTFS_FULL_DIR}/proc"
+    umount -l "${ROOTFS_FULL_DIR}/dev"
+    umount -l "${ROOTFS_FULL_DIR}/proc"
 
-    tar --xform s:'^./':: -czpf "${ROOTFS_FULL_ARCHIVE}" --xattrs -C "${ROOTFS_FULL_DIR}" .
+    tar --xform s:'^./':: -czpf "${ROOTFS_FULL_ARCHIVE}" --exclude="proc/*" --exclude="dev/*" --exclude="sys/*" --exclude="run/*" --xattrs -C "${ROOTFS_FULL_DIR}" .
     echo "rootfs-full building completed."
 fi
