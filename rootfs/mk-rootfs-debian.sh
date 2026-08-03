@@ -16,6 +16,41 @@ ROOTFS_MINIMAL_DIR="rootfs-debian-minimal"
 ROOTFS_FULL_ARCHIVE="rootfs-debian-full.tar.gz"
 ROOTFS_FULL_DIR="rootfs-debian-full"
 
+# 构建规格开关，默认全部构建
+BUILD_MINIMAL=1
+BUILD_FULL=1
+
+# 解析参数：可指定只构建某个规格
+for arg in "$@"; do
+    case "$arg" in
+        minimal)
+            if [ "${BUILD_MINIMAL}" = "0" ]; then
+                echo "错误: 参数 minimal 与 full 冲突"
+                exit 1
+            fi
+            BUILD_FULL=0
+            ;;
+        full)
+            if [ "${BUILD_FULL}" = "0" ]; then
+                echo "错误: 参数 minimal 与 full 冲突"
+                exit 1
+            fi
+            BUILD_MINIMAL=0
+            ;;
+        -h|--help)
+            echo "用法: $0 [minimal|full]"
+            echo "  不带参数：构建 base + minimal + full"
+            echo "  minimal   ：只构建 minimal（base 按需复用或构建）"
+            echo "  full      ：只构建 full（依赖已有的 minimal 归档）"
+            exit 0
+            ;;
+        *)
+            echo "未知参数: $arg"
+            exit 1
+            ;;
+    esac
+done
+
 if [ $(id -u) != "0" ]; then
     echo "Need root privilege to create rootfs!"
     exit 1
@@ -41,7 +76,7 @@ if [ ! -f "${ROOTFS_BASE_ARCHIVE}" ]; then
     echo "Base rootfs building completed."
 fi
 
-if [ ! -f "${ROOTFS_MINIMAL_ARCHIVE}" ]; then
+if [ "${BUILD_MINIMAL}" = "1" ] && [ ! -f "${ROOTFS_MINIMAL_ARCHIVE}" ]; then
     echo "No rootfs-minimal found, start building..."
     if [ ! -d "${ROOTFS_MINIMAL_DIR}" ]; then
         mkdir -p "${ROOTFS_MINIMAL_DIR}"
@@ -58,12 +93,14 @@ if [ ! -f "${ROOTFS_MINIMAL_ARCHIVE}" ]; then
     rm -f "${ROOTFS_MINIMAL_DIR}/etc/resolv.conf"
     cp /etc/resolv.conf "${ROOTFS_MINIMAL_DIR}/etc/resolv.conf"
 
+    mkdir -p "${ROOTFS_MINIMAL_DIR}/dev/pts" "${ROOTFS_MINIMAL_DIR}/dev/shm"
     mount -t devtmpfs devtmpfs "${ROOTFS_MINIMAL_DIR}/dev"
     mount -t devpts devpts "${ROOTFS_MINIMAL_DIR}/dev/pts"
     mount -t tmpfs tmpfs "${ROOTFS_MINIMAL_DIR}/dev/shm"
     mount -t proc proc "${ROOTFS_MINIMAL_DIR}/proc"
 
     cat << EOF | chroot "${ROOTFS_MINIMAL_DIR}" /bin/bash
+set -e
 
 rm -rf /debootstrap || true
 
@@ -113,15 +150,27 @@ ln -sf ../run/NetworkManager/resolv.conf /etc/resolv.conf
 
 EOF
 
-    umount -l "${ROOTFS_MINIMAL_DIR}/dev"
-    umount -l "${ROOTFS_MINIMAL_DIR}/proc"
+    if [ ${PIPESTATUS[1]} -ne 0 ]; then
+        echo "minimal chroot 执行失败，停止构建"
+        exit 1
+    fi
+
+    umount -l "${ROOTFS_MINIMAL_DIR}/dev/shm" 2>/dev/null || true
+    umount -l "${ROOTFS_MINIMAL_DIR}/dev/pts" 2>/dev/null || true
+    umount -l "${ROOTFS_MINIMAL_DIR}/dev" 2>/dev/null || true
+    umount -l "${ROOTFS_MINIMAL_DIR}/proc" 2>/dev/null || true
 
     tar --xform s:'^./':: -czpf "${ROOTFS_MINIMAL_ARCHIVE}" --exclude="proc/*" --exclude="dev/*" --exclude="sys/*" --exclude="run/*" --xattrs -C "${ROOTFS_MINIMAL_DIR}" .
     echo "rootfs-minimal building completed."
 fi
 
 
-if [ ! -f "${ROOTFS_FULL_ARCHIVE}" ]; then
+if [ "${BUILD_FULL}" = "1" ] && [ ! -f "${ROOTFS_FULL_ARCHIVE}" ]; then
+    if [ ! -f "${ROOTFS_MINIMAL_ARCHIVE}" ]; then
+        echo "错误: 构建 full 需要 minimal 归档 (${ROOTFS_MINIMAL_ARCHIVE})，但不存在。"
+        echo "请先运行: $0 minimal"
+        exit 1
+    fi
     echo "No rootfs-full found, start building..."
     if [ ! -d "${ROOTFS_FULL_DIR}" ]; then
         mkdir -p "${ROOTFS_FULL_DIR}"
@@ -132,12 +181,14 @@ if [ ! -f "${ROOTFS_FULL_ARCHIVE}" ]; then
     rm -f "${ROOTFS_FULL_DIR}/etc/resolv.conf"
     cp /etc/resolv.conf "${ROOTFS_FULL_DIR}/etc/resolv.conf"
 
+    mkdir -p "${ROOTFS_FULL_DIR}/dev/pts" "${ROOTFS_FULL_DIR}/dev/shm"
     mount -t devtmpfs devtmpfs "${ROOTFS_FULL_DIR}/dev"
     mount -t devpts devpts "${ROOTFS_FULL_DIR}/dev/pts"
     mount -t tmpfs tmpfs "${ROOTFS_FULL_DIR}/dev/shm"
     mount -t proc proc "${ROOTFS_FULL_DIR}/proc"
 
     cat << EOF | chroot "${ROOTFS_FULL_DIR}" /bin/bash
+set -e
 
 export DEBIAN_FRONTEND=noninteractive
 export LANG=en_US.UTF-8
@@ -160,8 +211,15 @@ ln -sf ../run/NetworkManager/resolv.conf /etc/resolv.conf
 
 EOF
 
-    umount -l "${ROOTFS_FULL_DIR}/dev"
-    umount -l "${ROOTFS_FULL_DIR}/proc"
+    if [ ${PIPESTATUS[1]} -ne 0 ]; then
+        echo "full chroot 执行失败，停止构建"
+        exit 1
+    fi
+
+    umount -l "${ROOTFS_FULL_DIR}/dev/shm" 2>/dev/null || true
+    umount -l "${ROOTFS_FULL_DIR}/dev/pts" 2>/dev/null || true
+    umount -l "${ROOTFS_FULL_DIR}/dev" 2>/dev/null || true
+    umount -l "${ROOTFS_FULL_DIR}/proc" 2>/dev/null || true
 
     tar --xform s:'^./':: -czpf "${ROOTFS_FULL_ARCHIVE}" --exclude="proc/*" --exclude="dev/*" --exclude="sys/*" --exclude="run/*" --xattrs -C "${ROOTFS_FULL_DIR}" .
     echo "rootfs-full building completed."
