@@ -1,9 +1,9 @@
 #!/bin/bash
 
-#DEB_REPO="http://deb.debian.org/debian"
-DEB_REPO="http://mirrors.ustc.edu.cn/debian"
+#DEB_REPO="https://deb.debian.org/debian"
+DEB_REPO="https://mirrors.ustc.edu.cn/debian"
 DEB_DISTRO="bookworm"
-PREINSTALL_PACKAGES="nano,build-essential"
+PREINSTALL_PACKAGES="nano,build-essential,ca-certificates"
 OVERLAY_DIR="overlay-debian"
 SOURCES_LIST_FILE="sources.list.debian"
 
@@ -16,32 +16,37 @@ ROOTFS_MINIMAL_DIR="rootfs-debian-minimal"
 ROOTFS_FULL_ARCHIVE="rootfs-debian-full.tar.gz"
 ROOTFS_FULL_DIR="rootfs-debian-full"
 
+ROOTFS_CUSTOM_ARCHIVE="rootfs-debian-custom.tar.gz"
+ROOTFS_CUSTOM_DIR="rootfs-debian-custom"
+
 # 构建规格开关，默认全部构建
 BUILD_MINIMAL=1
 BUILD_FULL=1
+BUILD_CUSTOM=1
 
-# 解析参数：可指定只构建某个规格
+# 解析参数：可指定只构建某个规格（minimal/custom/full 三选一，互斥）
+REQUESTED_MINIMAL=0
+REQUESTED_CUSTOM=0
+REQUESTED_FULL=0
+
 for arg in "$@"; do
     case "$arg" in
         minimal)
-            if [ "${BUILD_MINIMAL}" = "0" ]; then
-                echo "错误: 参数 minimal 与 full 冲突"
-                exit 1
-            fi
-            BUILD_FULL=0
+            REQUESTED_MINIMAL=1
+            ;;
+        custom)
+            REQUESTED_CUSTOM=1
             ;;
         full)
-            if [ "${BUILD_FULL}" = "0" ]; then
-                echo "错误: 参数 minimal 与 full 冲突"
-                exit 1
-            fi
-            BUILD_MINIMAL=0
+            REQUESTED_FULL=1
             ;;
         -h|--help)
-            echo "用法: $0 [minimal|full]"
-            echo "  不带参数：构建 base + minimal + full"
-            echo "  minimal   ：只构建 minimal（base 按需复用或构建）"
-            echo "  full      ：只构建 full（依赖已有的 minimal 归档）"
+            echo "用法: $0 [minimal|custom|full]"
+            echo "  不带参数：构建 base + minimal + custom + full"
+            echo "  minimal  ：只构建 minimal（base 按需复用或构建）"
+            echo "  custom   ：构建 minimal + custom（在 minimal 基础上加 KDE 桌面）"
+            echo "  full     ：只构建 full（依赖已有的 minimal 归档）"
+            echo "  说明：minimal/custom/full 三种规格互斥，一次只能指定一个"
             exit 0
             ;;
         *)
@@ -50,6 +55,24 @@ for arg in "$@"; do
             ;;
     esac
 done
+
+# 规格互斥校验（与参数出现顺序无关）
+if [ $(( REQUESTED_MINIMAL + REQUESTED_CUSTOM + REQUESTED_FULL )) -gt 1 ]; then
+    echo "错误: minimal/custom/full 三种规格互斥，一次只能指定一个"
+    exit 1
+fi
+
+# 依据被请求的规格设置构建开关（默认全部构建）
+if [ "${REQUESTED_MINIMAL}" = "1" ]; then
+    BUILD_CUSTOM=0
+    BUILD_FULL=0
+elif [ "${REQUESTED_CUSTOM}" = "1" ]; then
+    # custom 依赖 minimal 归档，因此保留 BUILD_MINIMAL=1
+    BUILD_FULL=0
+elif [ "${REQUESTED_FULL}" = "1" ]; then
+    BUILD_MINIMAL=0
+    BUILD_CUSTOM=0
+fi
 
 if [ $(id -u) != "0" ]; then
     echo "Need root privilege to create rootfs!"
@@ -66,6 +89,10 @@ cleanup_rootfs_mounts() {
     umount -l "${ROOTFS_FULL_DIR}/dev/pts" 2>/dev/null || true
     umount -l "${ROOTFS_FULL_DIR}/dev" 2>/dev/null || true
     umount -l "${ROOTFS_FULL_DIR}/proc" 2>/dev/null || true
+    umount -l "${ROOTFS_CUSTOM_DIR}/dev/shm" 2>/dev/null || true
+    umount -l "${ROOTFS_CUSTOM_DIR}/dev/pts" 2>/dev/null || true
+    umount -l "${ROOTFS_CUSTOM_DIR}/dev" 2>/dev/null || true
+    umount -l "${ROOTFS_CUSTOM_DIR}/proc" 2>/dev/null || true
 }
 trap cleanup_rootfs_mounts EXIT
 
@@ -130,6 +157,7 @@ echo "# The following lines are desirable for IPv6 capable hosts" >>/etc/hosts
 echo "::1       localhost ip6-localhost ip6-loopback" >>/etc/hosts
 echo "ff02::1   ip6-allnodes" >>/etc/hosts
 echo "ff02::2   ip6-allrouters" >>/etc/hosts
+echo "tmpfs /tmp tmpfs defaults,nodev,nosuid,size=512M,mode=1777 0 0" >> /etc/fstab
 
 apt-get install -fy sudo fakeroot devscripts cmake binfmt-support dh-make \
     dh-exec device-tree-compiler bc cpio parted dosfstools mtools alsa-utils \
@@ -164,6 +192,57 @@ EOF
     echo "rootfs-minimal building completed."
 fi
 
+if [ "${BUILD_CUSTOM}" = "1" ] && [ ! -f "${ROOTFS_CUSTOM_ARCHIVE}" ]; then
+    if [ ! -f "${ROOTFS_MINIMAL_ARCHIVE}" ]; then
+        echo "错误: 构建 custom 需要 minimal 归档 (${ROOTFS_MINIMAL_ARCHIVE})，但不存在。"
+        echo "请先运行: $0 minimal"
+        exit 1
+    fi
+    echo "No rootfs-custom found, start building..."
+    if [ ! -d "${ROOTFS_CUSTOM_DIR}" ]; then
+        mkdir -p "${ROOTFS_CUSTOM_DIR}"
+        tar -xzf "${ROOTFS_MINIMAL_ARCHIVE}" --xattrs --xattrs-include='*' -C "${ROOTFS_CUSTOM_DIR}"
+    fi
+
+    cp -f "${SOURCES_LIST_FILE}" "${ROOTFS_CUSTOM_DIR}/etc/apt/sources.list"
+    rm -f "${ROOTFS_CUSTOM_DIR}/etc/resolv.conf"
+    cp /etc/resolv.conf "${ROOTFS_CUSTOM_DIR}/etc/resolv.conf"
+
+    mkdir -p "${ROOTFS_CUSTOM_DIR}/dev/pts" "${ROOTFS_CUSTOM_DIR}/dev/shm"
+    mount -t devtmpfs devtmpfs "${ROOTFS_CUSTOM_DIR}/dev"
+    mount -t devpts devpts "${ROOTFS_CUSTOM_DIR}/dev/pts"
+    mount -t tmpfs tmpfs "${ROOTFS_CUSTOM_DIR}/dev/shm"
+    mount -t proc proc "${ROOTFS_CUSTOM_DIR}/proc"
+
+    cat << EOF | chroot "${ROOTFS_CUSTOM_DIR}" /bin/bash
+set -e
+
+export DEBIAN_FRONTEND=noninteractive
+export LANG=en_US.UTF-8
+
+apt-get install -fy kde-plasma-desktop sddm konsole \
+    fonts-noto-cjk fonts-wqy-zenhei
+
+apt-get clean
+
+rm -f /etc/resolv.conf
+ln -sf ../run/NetworkManager/resolv.conf /etc/resolv.conf
+
+EOF
+
+    if [ ${PIPESTATUS[1]} -ne 0 ]; then
+        echo "custom chroot 执行失败，停止构建"
+        exit 1
+    fi
+
+    umount -l "${ROOTFS_CUSTOM_DIR}/dev/shm" 2>/dev/null || true
+    umount -l "${ROOTFS_CUSTOM_DIR}/dev/pts" 2>/dev/null || true
+    umount -l "${ROOTFS_CUSTOM_DIR}/dev" 2>/dev/null || true
+    umount -l "${ROOTFS_CUSTOM_DIR}/proc" 2>/dev/null || true
+
+    tar --xform s:'^./':: -czpf "${ROOTFS_CUSTOM_ARCHIVE}" --exclude="proc/*" --exclude="dev/*" --exclude="sys/*" --exclude="run/*" --xattrs -C "${ROOTFS_CUSTOM_DIR}" .
+    echo "rootfs-custom building completed."
+fi
 
 if [ "${BUILD_FULL}" = "1" ] && [ ! -f "${ROOTFS_FULL_ARCHIVE}" ]; then
     if [ ! -f "${ROOTFS_MINIMAL_ARCHIVE}" ]; then
