@@ -72,6 +72,25 @@ cp -v build/arch/arm64/boot/Image deploy/
 cp -v build/arch/arm64/boot/dts/rockchip/rk3568-photonicat.dtb deploy/
 make O=build modules_install INSTALL_MOD_PATH="${WORKDIR}/kernel/deploy/modules" INSTALL_MOD_STRIP=1
 tar --owner=0 --group=0 --xform s:'^./':: -czf deploy/kmods.tar.gz -C "${WORKDIR}/kernel/deploy/modules" .
+# 生成供外部模块编译（DKMS / 外置模块）所需的构建树产物。
+# modules_prepare 在已 config 的 O=build 上生成 include/generated/autoconf.h、
+# include/config/kernel.release 等生成头与 Module.symvers，须在 config 之后运行，
+# 此处 O=build 已完成 defconfig + modules 构建，顺序合规。
+make O=build modules_prepare
+# 产出 UAPI 用户态内核头，安装到 deploy/headers。
+make O=build headers_install INSTALL_HDR_PATH="${WORKDIR}/kernel/deploy/headers"
+# 将用户态头打包为 deploy/kheaders.tar.gz。
+tar --owner=0 --group=0 --xform s:'^./':: -czf deploy/kheaders.tar.gz -C "${WORKDIR}/kernel/deploy/headers" .
+# 将外部模块编译所需的构建树最小集合打包为 deploy/kbuild.tar.gz。
+# 取舍：不整树拷贝 build/——其中大量对象/中间产物与 kernel/ 源码重复、体积巨大；
+# 外部模块编译（make -C <build> M=...）实际需要的是 build 里的生成文件 + kernel/ 源码树配合。
+# rootfs 侧将来会把 kernel/ 源码摆到 /usr/src 并将 build 链接过去，本脚本只产出 build 产物。
+tar --owner=0 --group=0 --xform s:'^./':: -czf deploy/kbuild.tar.gz \
+    -C "${WORKDIR}/kernel/build" \
+    include \
+    arch/arm64/include/generated \
+    Module.symvers \
+    .config
 cd "${WORKDIR}"
 
 mkdir -p deploy
@@ -82,6 +101,8 @@ cp -v u-boot/deploy/u-boot.itb deploy/
 cp -v kernel/deploy/Image deploy/
 cp -v kernel/deploy/rk3568-photonicat.dtb deploy/
 cp -v kernel/deploy/kmods.tar.gz deploy/
+cp -v kernel/deploy/kheaders.tar.gz deploy/
+cp -v kernel/deploy/kbuild.tar.gz deploy/
 
 echo "Base system builds completed."
 #dd if=idbloader.img of=/dev/mmcblk0 seek=64 conv=notrunc

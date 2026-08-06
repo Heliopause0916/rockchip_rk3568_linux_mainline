@@ -44,7 +44,7 @@ for arg in "$@"; do
             echo "用法: $0 [minimal|custom|full]"
             echo "  不带参数：构建 base + minimal + custom + full"
             echo "  minimal  ：只构建 minimal（base 按需复用或构建）"
-            echo "  custom   ：构建 minimal + custom（在 minimal 基础上加 KDE 桌面）"
+            echo "  custom   ：构建 minimal + custom（在 minimal 基础上加 LXQt 桌面）"
             echo "  full     ：只构建 full（依赖已有的 minimal 归档）"
             echo "  说明：minimal/custom/full 三种规格互斥，一次只能指定一个"
             exit 0
@@ -167,7 +167,7 @@ apt-get install -fy sudo fakeroot devscripts cmake binfmt-support dh-make \
     meson libglib2.0-dev libjson-c-dev libgpiod-dev libusb-1.0-0-dev gdb \
     p7zip-full net-tools iotop wget firmware-linux-free firmware-linux-nonfree \
     firmware-misc-nonfree firmware-atheros firmware-iwlwifi firmware-brcm80211 \
-    bridge-utils
+    bridge-utils systemd-zram-generator
 
 apt-get clean
 
@@ -220,7 +220,7 @@ set -e
 export DEBIAN_FRONTEND=noninteractive
 export LANG=en_US.UTF-8
 
-apt-get install -fy kde-plasma-desktop sddm konsole \
+apt-get install -fy lxqt lightdm lightdm-gtk-greeter qterminal \
     fonts-noto-cjk fonts-wqy-zenhei
 
 apt-get clean
