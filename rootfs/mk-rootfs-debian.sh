@@ -167,7 +167,7 @@ apt-get install -fy sudo fakeroot devscripts cmake binfmt-support dh-make \
     meson libglib2.0-dev libjson-c-dev libgpiod-dev libusb-1.0-0-dev gdb \
     p7zip-full net-tools iotop wget firmware-linux-free firmware-linux-nonfree \
     firmware-misc-nonfree firmware-atheros firmware-iwlwifi firmware-brcm80211 \
-    bridge-utils systemd-zram-generator
+    bridge-utils systemd-zram-generator linux-libc-dev
 
 apt-get clean
 
