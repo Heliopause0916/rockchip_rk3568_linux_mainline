@@ -11,23 +11,24 @@ Also add a +/-0.5% pixel-clock tolerance to dw_hdmi_rockchip_mode_valid()
 so that non-integer rates such as 4K@59.94 (593.407MHz) and 4K@29.97
 (296.703MHz) are accepted (|pclk - table| <= table/200).
 ---
- drivers/gpu/drm/rockchip/dw_hdmi-rockchip.c | 16 +++++++++++++++-
- 1 file changed, 15 insertions(+), 1 deletion(-)
+ drivers/gpu/drm/rockchip/dw_hdmi-rockchip.c | 18 +++++++++++++++++-
+ 1 file changed, 18 insertions(+), 1 deletion(-)
 
 diff --git a/drivers/gpu/drm/rockchip/dw_hdmi-rockchip.c b/drivers/gpu/drm/rockchip/dw_hdmi-rockchip.c
-index 2c43dd6..b87cb77 100644
+index ae857bf..b87cb77 100644
 --- a/drivers/gpu/drm/rockchip/dw_hdmi-rockchip.c
 +++ b/drivers/gpu/drm/rockchip/dw_hdmi-rockchip.c
-@@ -161,7 +161,17 @@ static const struct dw_hdmi_mpll_config rockchip_mpll_cfg[] = {
+@@ -160,6 +160,18 @@ static const struct dw_hdmi_mpll_config rockchip_mpll_cfg[] = {
+ 			{ 0x214c, 0x0003},
  			{ 0x4064, 0x0003}
  		},
- 	}, {
++	}, {
 +		297000000, {
 +			{ 0x0040, 0x0003},
 +			{ 0x3b4c, 0x0003},
 +			{ 0x5a64, 0x0003}
 +		},
- 	}, {
++	}, {
 +		594000000, {
 +			{ 0x1a40, 0x0003},
 +			{ 0x3b4c, 0x0003},
@@ -36,15 +37,16 @@ index 2c43dd6..b87cb77 100644
  	}, {
  		~0UL, {
  			{ 0x00a0, 0x000a },
-@@ -188,6 +198,7 @@ static const struct dw_hdmi_curr_ctrl rockchip_cur_ctr[] = {
+@@ -185,6 +197,8 @@ static const struct dw_hdmi_curr_ctrl rockchip_cur_ctr[] = {
+ 		146250000, { 0x0038, 0x0038, 0x0038 },
  	}, {
  		148500000, { 0x0000, 0x0038, 0x0038 },
- 	}, {
++	}, {
 +		600000000, { 0x0000, 0x0000, 0x0000 },
  	}, {
  		~0UL,      { 0x0000, 0x0000, 0x0000},
  	}
-@@ -198,6 +209,7 @@ static const struct dw_hdmi_phy_config rockchip_phy_config[] = {
+@@ -195,6 +209,7 @@ static const struct dw_hdmi_phy_config rockchip_phy_config[] = {
  	{ 74250000,  0x8009, 0x0004, 0x0272},
  	{ 148500000, 0x802b, 0x0004, 0x028d},
  	{ 297000000, 0x8039, 0x0005, 0x028d},
@@ -52,7 +54,7 @@ index 2c43dd6..b87cb77 100644
  	{ ~0UL,	     0x0000, 0x0000, 0x0000}
  };
  
-@@ -254,7 +266,9 @@ dw_hdmi_rockchip_mode_valid(struct dw_hdmi *hdmi, void *data,
+@@ -251,7 +266,9 @@ dw_hdmi_rockchip_mode_valid(struct dw_hdmi *hdmi, void *data,
  	int i;
  
  	for (i = 0; mpll_cfg[i].mpixelclock != (~0UL); i++) {

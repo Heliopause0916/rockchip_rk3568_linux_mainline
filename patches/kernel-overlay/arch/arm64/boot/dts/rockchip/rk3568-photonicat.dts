@@ -337,6 +337,7 @@
 &hdmi {
 	avdd-0v9-supply = <&vdda_0v9>;
 	avdd-1v8-supply = <&vcca_1v8>;
+	max-tmds-clock = <594000000>;
 	status = "okay";
 };
 
