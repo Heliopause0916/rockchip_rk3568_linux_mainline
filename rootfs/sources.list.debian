@@ -1,15 +1,15 @@
-#deb https://deb.debian.org/debian/ bookworm main non-free contrib non-free-firmware
-#deb https://deb.debian.org/debian/ bookworm-proposed-updates main non-free contrib non-free-firmware
-#deb https://deb.debian.org/debian/ bookworm-backports main non-free contrib non-free-firmware
-#deb-src https://deb.debian.org/debian/ bookworm main non-free contrib non-free-firmware 
-#deb-src https://deb.debian.org/debian/ bookworm-proposed-updates main non-free contrib non-free-firmware
-#deb-src https://deb.debian.org/debian/ bookworm-backports main non-free contrib non-free-firmware
+#deb https://deb.debian.org/debian/ trixie main non-free contrib non-free-firmware
+#deb https://deb.debian.org/debian/ trixie-proposed-updates main non-free contrib non-free-firmware
+#deb https://deb.debian.org/debian/ trixie-backports main non-free contrib non-free-firmware
+#deb-src https://deb.debian.org/debian/ trixie main non-free contrib non-free-firmware 
+#deb-src https://deb.debian.org/debian/ trixie-proposed-updates main non-free contrib non-free-firmware
+#deb-src https://deb.debian.org/debian/ trixie-backports main non-free contrib non-free-firmware
 
-deb https://mirrors.ustc.edu.cn/debian/ bookworm main non-free contrib non-free-firmware
-deb https://mirrors.ustc.edu.cn/debian/ bookworm-proposed-updates main non-free contrib non-free-firmware
-deb https://mirrors.ustc.edu.cn/debian/ bookworm-backports main non-free contrib non-free-firmware
+deb https://mirrors.ustc.edu.cn/debian/ trixie main non-free contrib non-free-firmware
+deb https://mirrors.ustc.edu.cn/debian/ trixie-proposed-updates main non-free contrib non-free-firmware
+deb https://mirrors.ustc.edu.cn/debian/ trixie-backports main non-free contrib non-free-firmware
 
-#deb https://deb.debian.org/debian-security bookworm-security/updates main contrib non-free-firmware
-#deb-src https://deb.debian.org/debian-security bookworm-security/updates main contrib non-free-firmware
+#deb https://deb.debian.org/debian-security trixie-security/updates main contrib non-free-firmware
+#deb-src https://deb.debian.org/debian-security trixie-security/updates main contrib non-free-firmware
 
-deb https://mirrors.ustc.edu.cn/debian-security bookworm-security/updates main contrib non-free-firmware
+deb https://mirrors.ustc.edu.cn/debian-security trixie-security/updates main contrib non-free-firmware

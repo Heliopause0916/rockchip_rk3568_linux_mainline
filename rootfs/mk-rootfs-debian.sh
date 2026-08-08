@@ -2,7 +2,7 @@
 
 #DEB_REPO="https://deb.debian.org/debian"
 DEB_REPO="https://mirrors.ustc.edu.cn/debian"
-DEB_DISTRO="bookworm"
+DEB_DISTRO="trixie"
 PREINSTALL_PACKAGES="nano,build-essential,ca-certificates"
 OVERLAY_DIR="overlay-debian"
 SOURCES_LIST_FILE="sources.list.debian"
@@ -161,8 +161,8 @@ echo "tmpfs /tmp tmpfs defaults,nodev,nosuid,size=512M,mode=1777 0 0" >> /etc/fs
 
 apt-get install -fy sudo fakeroot devscripts cmake binfmt-support dh-make \
     dh-exec device-tree-compiler bc cpio parted dosfstools mtools alsa-utils \
-    libssl-dev dpkg-dev isc-dhcp-client-ddns build-essential libgpiod2 \
-    libjson-c5 libusb-1.0-0 nano network-manager i2c-tools ntp git \
+    libssl-dev dpkg-dev build-essential libgpiod3 \
+    libjson-c5 libusb-1.0-0 nano network-manager i2c-tools ntpsec git \
     usbutils pciutils htop openssh-server build-essential autotools-dev \
     meson libglib2.0-dev libjson-c-dev libgpiod-dev libusb-1.0-0-dev gdb \
     p7zip-full net-tools iotop wget firmware-linux-free firmware-linux-nonfree \
