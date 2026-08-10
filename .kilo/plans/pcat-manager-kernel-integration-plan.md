@@ -3,7 +3,7 @@
 > 项目：rockchip_rk3568_linux_mainline
 > 路线：主线内核 6.1.106 + debootstrap 自建 Debian（rootfs 已升级到 trixie / Debian 13）
 > 目标机器：Photonicat 一代（RK3568）
-> 状态：**仅规划与调研阶段，暂不执行具体改动**
+> 状态：**已完成（Phase 0/1/2 均已实施并上板实证通过）——本源规划作为落地记录留存，不再处于规划期**
 
 ---
 
@@ -136,6 +136,76 @@
 4. 用户态若与内核**共用同一 uart，必须停用旧 v1 用户态心跳**（否则抢串口）。
 5. **何时该走内核路线**：先等用户在板上确认"重编译后的 v1 pcat-manager（用户态）能否独立解决看门狗问题"。若用户态方案已足够，内核化可作为"更正规/更省发行版依赖"的后续优化；若用户态不可行，则内核化是必需。
 
+### 2.4.1 用户进行电源自定义配置的关键途径（接口清单）
+
+> **导语**：本仓库走主线内核 + 自建 Debian 路线，**不构建 OpenWrt 专用的 pcat-manager-web**（其强绑定 `uci/ubus/opkg/LuCI/board.json` 等，无法直接跑在自建 Debian 上）。但它与 pcat-manager 之间的 `/tmp/pcat-manager.sock` 命令协议**本身与发行版无关**，可在 Debian 上直接对接复用。
+
+"用户进行电源自定义配置"的两种落地形态：
+
+| 形态 | 底层通道 | 配置入口 | 说明 |
+|------|----------|----------|------|
+| ① v1 现状（路线 A） | pcat-manager 直接 `open /dev/ttyS4` | conf 文件 + socket 命令触发 | 当前板上正在验证的形态 |
+| ② 内核化后（Phase 2，与 v2 同构） | pcat-manager 改经 `/dev/pcat-pm-ctl` 下发 | socket 命令协议**不变**，仍为外部触发入口 | 也可用纯 Flask 前端只对接 socket，不引入 OpenWrt 依赖 |
+
+> ⚠️ **途径① 已失效（双通道互斥）**：内核 `photonicat-pm` 驱动经 serdev 绑定 uart4 后，将**独占**该端口（`devm_serdev_device_open`），用户态 pcat-manager **不能再 open `/dev/ttyS4`**。内核化落地后，途径① 不再可用，用户态与内核的唯一交互通道改为 `/dev/pcat-pm-ctl`（见下面途径③）。
+
+**途径① —— 配置文件（v1 现状，最直接，⚠️ 内核化后失效）**
+
+| 配置项 | 文件 / 字段 | 生效方式 |
+|--------|-------------|----------|
+| 定时开机 / 充电自动开机 | `/etc/pcat-manager-userdata.conf`：`[Schedule] EnableBitsN/DateN/TimeN/DOWBitsN/ActionN`；`[General] ChargerOnAutoStart` | 重启 pcat-manager 服务后 init 自动下发（定时开机 `0xB`、充电自动开机 `0x15`） |
+| 电压 / 电量阈值 | `/etc/pcat-manager.conf`：`[PowerManager]` 的 `StartupVoltage` 等（LED 高中低、启动/充电/关机/快充电压、电池满阈） | 重启服务生效（`0x17`）；另有运行时按 modem 功耗等级动态重下发 `AutoShutdownVoltage*` |
+| 网络状态 LED | `0x19` | 运行时按路由模式变化**自动发**（非启动下发） |
+
+> 注：systemd 服务只负责拉起 daemon，**不承载设置操作**（`pcat-manager.service`，`ExecStart=pcat-manager --distro`）。
+
+**途径② —— `/tmp/pcat-manager.sock`（Unix socket，发行版无关，推荐对接）**
+
+- 通道：AF_UNIX `SOCK_STREAM`，地址 `/tmp/pcat-manager.sock`，命令为 **JSON + `'\0'` 结尾**。
+- 与电源自定义配置相关的命令（来自 v1 `controller.c`）与含义：
+
+| 命令 | 功能 | 说明 |
+|------|------|------|
+| `schedule-power-event-set/get` | 读写定时开关机事件列表 | `action` 0=关机、1=开机；`enable-bits/dow-bits` 描述年月日时分星期；**写后即时触发 `0xB` 下发**并持久化回 userdata |
+| `charger-on-auto-start-set/get` | 充电自动开机 / 车载模式 | `state` + `timeout` 延时分钟；**写后即时触发 `0x15` 下发** |
+| `power-on-mode-get/set` | 开机模式 | 0=手动、1=自动开机、2=直连电源/忽略电量。*注：该命令形式参考 v2/pcat-manager-web，v1 controller 是否已提供需标注 `[待验证]`* |
+| `charge-threshold-get/set` | 充电上限阈值 | 如 80–100。*同上，`[待验证]`* |
+| `pmu-io-get/set` | 状态 LED / 蜂鸣器 | `status-led-v2` / `beeper` |
+| `pmu-status`（只读） | 电池/充电电压、电量、板温 | — |
+| `pmu-fw-version-get`（只读） | 固件版本 | — |
+
+> 说明：此 socket 上还有 `modem-*`、`network-route-mode-get` 等**非 PMU 命令**，一并走同一通道。
+
+**途径③ —— `/dev/pcat-pm-ctl`（仅内核化 Phase 1/2 后可用）**
+
+- v1 当前为**占位空桩**（`read/write` `return 0`），Phase 1.5 需补齐**白名单转发**：用户态写入的厂商命令（`0xB/0x15/0x17/0x19/0x1B/0x5`）经 serdev 转发到 MCU，内核自消耗命令（心跳/状态/时间同步/看门狗超时）被吞。
+- 内核化后**完整链路**：
+
+```
+用户（脚本 / 纯Flask前端 / 手调socket）
+   → /tmp/pcat-manager.sock
+   → pcat-manager 常驻守护进程
+   → write /dev/pcat-pm-ctl
+   → 内核 photonicat-pm 驱动（白名单过滤）
+   → UART/serdev
+   → MCU
+```
+
+**看门狗 `0x13` 帧参数语义**（由内核驱动在 init 时自己下发）：
+
+- 参数三元组语义为 `{timeout_boot, force_poweroff_timeout, feed_interval}`，本项目的规划语义为 `{60, 60, 5}`。
+- 其中 `force_poweroff_timeout` 由 DTS 中 `pcat-pm` 子节点的 `force-poweroff-timeout` 属性提供（**默认 60**）；`timeout_boot` / `feed_interval` 为驱动内规划常量（60 / 5）。
+
+**⚠️ 原子落地（deploy safety）建议**：
+
+- **纯内核侧单独落地不安全**：内核 serdev 驱动与用户态 pcat-manager 会**同时写 uart4**，双协议栈抢线会造成帧损坏 / 看门狗复位。内核驱动、用户态切换到 `/dev/pcat-pm-ctl`、停用其 ttyS4 采集路径（即 Phase 2），**必须在同一个镜像内原子落地**，不可只先上内核侧。
+- **落地顺序与依赖**：确认目标 rootfs 上运行了 `depmod`（生成 `modules.alias` / `modules.dep`）以支持 serdev OF-modalias 自动加载；确认 `modprobe photonicat-pm` 能加载、`/dev/pcat-pm-ctl` 出现、驱动已喂狗后，**再停用用户态 ttyS4 路径**，避免喂狗空窗。
+- **关键停用点**：`rootfs/rootfs-debian-custom/etc/pcat-manager.conf:13` 的 `SerialDevice=/dev/ttyS4` 是 Phase 2 必须停用的关键配置。
+
+**一句话总结**
+
+> 在自建 Debian 上，用户实现自定义电源配置的两个可落地入口：① **改 conf 文件 + 重启服务**（v1 现状，**内核 serdev 绑定 uart4 后即失效**）；② **向 `/tmp/pcat-manager.sock` 发送 JSON 命令**（发行版无关、推荐，且是 Web/脚本前端统一对接点）。内核化后底层改为经 `/dev/pcat-pm-ctl`，**socket 命令协议保持兼容**、作为外部触发入口不变。
+
 ---
 
 ## 三、两条路线对比与决策建议
@@ -169,6 +239,8 @@
 > 2. 有明确意愿投入 DTS + 内核补丁 + ctl 写路径的开发；
 > 3. 接受串口由内核独占、用户态经 ctl 交互的新形态。
 
+> **结论（2026-08-10）**：路线 B（内核化）已实施并上板验证通过，本仓库已转为主线的内核 photonicat-pm + 用户态经 `/dev/pcat-pm-ctl` 下发配置的形态；原「暂不执行」状态作废。
+
 ---
 
 ## 四、实施计划（Phase 0 / 1 / 2）
@@ -194,6 +266,8 @@
 
 **目标**：让内核 serdev 驱动接管 /dev/ttyS4 + 心跳 + 看门狗 + 电源状态；为用户态退化为 ctl 下发铺路。
 
+> **✅ 已完成（见实测结论节）**：Phase 1 各部分（驱动合入 / DTS serdev 节点 / 停用旧心跳 / 装 .ko / ctl 写路径）均已实施并上板验证通过，验收标准见「五.五、实测结论」。
+
 | 步骤 | 任务 | 产出 | 命令/方式 | 验收标准 | 风险 |
 |------|------|------|-----------|----------|------|
 | 1.1 | **合入完整驱动源码**：以 v1 `mods/photonicat-pm.c` 为基础，参照 v2 `mods/photonicat-pm.c` 补齐能力（尤其 `/dev/pcat-pm-ctl` 写路径）；修正 `receive_buf` 返回类型 `size_t → int` | 可独立编译的 `photonicat-pm.ko` 源码（本仓库 kernel 侧或 out-of-tree 构建目录） | 6.1.106 O=build 溢出构建；或 out-of-tree `KERNELDIR=build make` | 编译通过、40 符号全解析、生成 `.ko`；无 `.rej/.orig` 残留（见风险） | 补写路径复杂度高（见 5）；v1 空桩与 v2 完整版差异需逐项核对 |
@@ -209,6 +283,8 @@
 ### Phase 2（可选，路线 B 第二步）：用户态 pcat-manager 切换 + modem 迁移 + service 形态
 
 **目标**：与 v2 完全同构——用户态经 `/dev/pcat-pm-ctl` 下发配置、从 sysfs/power_supply/hwmon 读遥测；modem 可选迁内核；service 形态定型。
+
+> **✅ 已完成（见实测结论节）**：Phase 2 各部分（用户态经 ctl 下发 / 遥测读取 / service 形态）均已实施并上板验证通过，验收标准见「五.五、实测结论」；仅 modem 迁移（2.2）与 v2 不完全同构，见「遗留开放项」。
 
 | 步骤 | 任务 | 产出 | 命令/方式 | 验收标准 | 风险 |
 |------|------|------|-----------|----------|------|
@@ -234,6 +310,41 @@
 | 7 | **modem 迁移是否必须** | 迁内核 rfkill-gpio + ModemManager 是"与 v2 完全一致"所需；不迁移则保留 v1 libgpiod | 标记为可选；取决于"与 v2 完全同构"是否为硬要求 |
 | 8 | **补丁应用静默失败** | 本项目历史教训：构建补丁应用失败会落入 `.rej` 被静默跳过，导致残缺产物烧上板 | 每次重编译后核验 `kernel/` 下无 `.rej/.orig` 残留（对应既有 corrections 记忆） |
 | 9 | **libgpiod v2→v3 运行期语义** | 已移植到 v2 API 并链接 .so.3，但板上运行期的 active-low/line 请求语义需实机验证 | Phase 0 实机重点观察 modem GPIO 行为 `[待验证]` |
+
+**主要风险实机闭环总结**：以下关键风险已在实机逐项闭环——① 双通道互斥已验证达成（内核 serdev 绑定 uart4 后 `/dev/ttyS4` 不再存在，用户态经 `/dev/pcat-pm-ctl` 正常下发）；② `0xF`/reboot 语义已澄清（`0xF` 仅属 poweroff，reboot 不发 `0xF`）；③ ctl 白名单转发已验证有效（FW 版本回读成功）；④ RTC 与 ntpsec 已确认无冲突（RTC 经 ntpsec 同步成功）。其余开放项（modem 迁移等）见下方「遗留开放项」。
+
+---
+
+## 五.五、实测结论（2026-08-10 实机验证通过）
+
+> Phase 0/1/2 已在实机（RK3568，内核 6.1.106）上板验证通过，以下为关键实测结果。
+
+**验证通过清单**
+
+| 验证项 | 实测结果 |
+|--------|----------|
+| 模块加载 / serdev modalias 自动 probe | ✅ 模块开机自动加载，photonicat-pm serdev 自动绑定 uart4 并 probe 成功 |
+| `/dev/pcat-pm-ctl` 存在且被用户态占用 | ✅ ctl 设备存在并成功打开；同时注册为 rtc0 |
+| `/dev/ttyS4` 不存在（双通道互斥） | ✅ 板上已无 `/dev/ttyS4`，内核 serdev 独占 UART，双通道互斥达成 |
+| ctl 白名单转发 + ACK 回读 | ✅ 白名单转发有效，PMU FW 版本回读成功（`RA2E1230523000`） |
+| 喂狗不死机 | ✅ 连续喂狗 >20min 无 60s/120s 复位（uptime 1684s） |
+| 电池校准值实测 | ✅ MIN 3450000 / MAX 4200000 / capacity 96 / voltage_now 4156000 / Charging |
+| charger 在线 | ✅ charger 在线（5.02V） |
+| RTC 经 ntpsec 同步 | ✅ RTC 经 ntpsec 同步成功 |
+| poweroff 正常断电 | ✅ poweroff 正常断电（电源灯/网卡灯灭） |
+| reboot 正常复位 | ✅ reboot 正常复位（网络中断后恢复） |
+
+**关键语义说明（重要修正）**
+
+> `0xF HOST_REQUEST_SHUTDOWN` **仅属 poweroff**。reboot 时内核重启处理器（`SYS_OFF_MODE_RESTART`）**不发 `0xF`**，仅发 `0x13`(interval=0) 禁看门狗 + 停 worker + 靠 SoC 自身复位——若 reboot 也发 `0xF` 会变成关机而无法重启，因此当前对 poweroff/reboot 的差异处理是正确设计，无需改动。
+
+**遗留开放项（非阻塞）**
+
+| # | 项 | 状态 / 说明 |
+|---|----|-------------|
+| ① | 板温/风扇读 0 | 判定为 MCU 未上报有效温度字节（data[17]=100），非内核 bug，优先级低；如需真实板温另行追查（临时 printk 抓帧判别） |
+| ② | `feed_interval` 实现值=10 | 规划注释写 `{60,60,5}`，实测实现值为 10，是否改回 5 待上层拍板 |
+| ③ | modem 仍用 libgpiod | 未迁移 DTS `rfkill-gpio`，与 v2 不完全同构，属范围外、非阻塞 |
 
 ---
 
@@ -286,4 +397,4 @@
 
 ---
 
-*文档状态：规划调研稿（尚未执行改动）。所有标注 `[待验证]` 的内容均需在对应 Phase 实机/实编译验证后确认。*
+*文档状态：Phase 0/1/2 已全部实施并上板实证通过。除下方「遗留开放项」外，本文档中标注 [待验证] 的关键项均已在实机确认。*

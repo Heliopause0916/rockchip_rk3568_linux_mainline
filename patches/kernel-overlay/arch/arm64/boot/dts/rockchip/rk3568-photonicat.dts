@@ -238,6 +238,28 @@
 		};
 	};
 
+	battery: battery {
+		compatible = "simple-battery";
+		device-chemistry = "lithium-ion";
+		charge-full-design-microamp-hours = <7000000>;
+		voltage-min-design-microvolt = <3450000>;
+		voltage-max-design-microvolt = <4200000>;
+		ocv-capacity-celsius = <25>;
+		ocv-capacity-table-0 = <
+			4200000 100
+			4060000 90
+			3980000 80
+			3920000 70
+			3870000 60
+			3820000 50
+			3790000 40
+			3770000 30
+			3740000 20
+			3680000 10
+			3450000 0
+		>;
+	};
+
 	reserved-memory {
 		#address-cells = <2>;
 		#size-cells = <2>;
@@ -570,6 +592,18 @@
 
 &uart4 {
 	status = "okay";
+	baudrate = <115200>;
+	pcat-pm {
+		compatible = "photonicat-pm";
+		baudrate = <115200>;
+		pm-version = <1>;
+		force-poweroff-timeout = <60>;
+		charger {
+			monitored-battery = <&battery>;
+		};
+		fan {
+		};
+	};
 };
 
 &usb_host0_ehci {
