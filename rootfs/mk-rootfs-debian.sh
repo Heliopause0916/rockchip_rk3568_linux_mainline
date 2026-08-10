@@ -99,6 +99,11 @@ trap cleanup_rootfs_mounts EXIT
 if [ ! -f "${ROOTFS_BASE_ARCHIVE}" ]; then
     echo "No base rootfs found, start building..."
     debootstrap --arch=arm64 --include="${PREINSTALL_PACKAGES}" "${DEB_DISTRO}" "${ROOTFS_DIR}" "${DEB_REPO}"
+
+    # base 阶段最小清理：清 apt 缓存与包索引，删除 debootstrap 临时脚本
+    rm -rf "${ROOTFS_DIR}"/var/cache/apt/archives/* "${ROOTFS_DIR}"/var/lib/apt/lists/*
+    rm -rf "${ROOTFS_DIR}/debootstrap" || true
+
     tar --xform s:'^./':: -czpf "${ROOTFS_BASE_ARCHIVE}" --xattrs -C "${ROOTFS_DIR}" .
     echo "Base rootfs building completed."
 fi
@@ -171,6 +176,14 @@ apt-get install -fy sudo fakeroot devscripts cmake binfmt-support dh-make \
 
 apt-get clean
 
+rm -rf /var/lib/apt/lists/* || true
+rm -rf /var/cache/debconf/* /var/cache/apt/* || true
+find /var/log -type f \( -name '*.log' -o -name '*.gz' \) -delete 2>/dev/null || true
+rm -rf /var/log/journal/* || true
+rm -rf /tmp/* /var/tmp/* || true
+rm -f /etc/ssh/ssh_host_* || true
+rm -f /etc/machine-id /var/lib/dbus/machine-id || true
+
 usermod -a -G audio photonicat
 
 rm -f /etc/resolv.conf
@@ -220,10 +233,20 @@ set -e
 export DEBIAN_FRONTEND=noninteractive
 export LANG=en_US.UTF-8
 
+apt-get update
+
 apt-get install -fy lxqt lightdm lightdm-gtk-greeter qterminal \
     fonts-noto-cjk fonts-wqy-zenhei
 
 apt-get clean
+
+rm -rf /var/lib/apt/lists/* || true
+rm -rf /var/cache/debconf/* /var/cache/apt/* || true
+find /var/log -type f \( -name '*.log' -o -name '*.gz' \) -delete 2>/dev/null || true
+rm -rf /var/log/journal/* || true
+rm -rf /tmp/* /var/tmp/* || true
+rm -f /etc/ssh/ssh_host_* || true
+rm -f /etc/machine-id /var/lib/dbus/machine-id || true
 
 rm -f /etc/resolv.conf
 ln -sf ../run/NetworkManager/resolv.conf /etc/resolv.conf
@@ -272,6 +295,8 @@ set -e
 export DEBIAN_FRONTEND=noninteractive
 export LANG=en_US.UTF-8
 
+apt-get update
+
 apt-get install -fy pipewire pipewire-alsa pipewire-pulse pavucontrol \
     zenity gnome celluloid fonts-cantarell fonts-wqy-zenhei \
     fonts-noto-cjk ibus ibus-libpinyin ibus-gtk ibus-gtk3 \
@@ -282,6 +307,14 @@ apt-get install -fy pipewire pipewire-alsa pipewire-pulse pavucontrol \
     gparted
 
 apt-get clean
+
+rm -rf /var/lib/apt/lists/* || true
+rm -rf /var/cache/debconf/* /var/cache/apt/* || true
+find /var/log -type f \( -name '*.log' -o -name '*.gz' \) -delete 2>/dev/null || true
+rm -rf /var/log/journal/* || true
+rm -rf /tmp/* /var/tmp/* || true
+rm -f /etc/ssh/ssh_host_* || true
+rm -f /etc/machine-id /var/lib/dbus/machine-id || true
 
 usermod -a -G render Debian-gdm
 
@@ -303,3 +336,10 @@ EOF
     tar --xform s:'^./':: -czpf "${ROOTFS_FULL_ARCHIVE}" --exclude="proc/*" --exclude="dev/*" --exclude="sys/*" --exclude="run/*" --xattrs -C "${ROOTFS_FULL_DIR}" .
     echo "rootfs-full building completed."
 fi
+
+# 构建完成：保留各阶段工作目录与全部归档产物
+echo "最终 rootfs 归档保留："
+echo "  ${ROOTFS_BASE_ARCHIVE}（保留：供 base 复用，避免后续规格构建时重新 debootstrap）"
+echo "  ${ROOTFS_MINIMAL_ARCHIVE}"
+echo "  ${ROOTFS_CUSTOM_ARCHIVE}"
+echo "  ${ROOTFS_FULL_ARCHIVE}"
