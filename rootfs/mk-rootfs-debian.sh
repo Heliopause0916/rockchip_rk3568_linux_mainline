@@ -105,6 +105,18 @@ if [ ! -f "${ROOTFS_BASE_ARCHIVE}" ]; then
     rm -rf "${ROOTFS_DIR}"/var/cache/apt/archives/* "${ROOTFS_DIR}"/var/lib/apt/lists/*
     rm -rf "${ROOTFS_DIR}/debootstrap" || true
 
+    # 打包前从宿主机侧强制清理敏感数据（ssh 私钥 / machine-id），不依赖 chroot heredoc 是否生效
+    rm -f "${ROOTFS_DIR}"/etc/ssh/ssh_host_* \
+          "${ROOTFS_DIR}"/etc/machine-id \
+          "${ROOTFS_DIR}"/var/lib/dbus/machine-id
+    # 显式核验：打包前若仍存在则拒绝打包，避免静默打包出带敏感数据的镜像
+    if compgen -G "${ROOTFS_DIR}/etc/ssh/ssh_host_*" >/dev/null 2>&1 \
+       || [ -e "${ROOTFS_DIR}/etc/machine-id" ] \
+       || [ -e "${ROOTFS_DIR}/var/lib/dbus/machine-id" ]; then
+        echo "错误：打包 ${ROOTFS_BASE_ARCHIVE} 前仍存在 ssh 主机私钥或 machine-id，已终止打包" >&2
+        exit 1
+    fi
+
     tar --xform s:'^./':: -czpf "${ROOTFS_BASE_ARCHIVE}" --xattrs -C "${ROOTFS_DIR}" .
     echo "Base rootfs building completed."
 fi
@@ -205,6 +217,18 @@ EOF
     umount -l "${ROOTFS_MINIMAL_DIR}/dev" 2>/dev/null || true
     umount -l "${ROOTFS_MINIMAL_DIR}/proc" 2>/dev/null || true
 
+    # 打包前从宿主机侧强制清理敏感数据（ssh 私钥 / machine-id），不依赖 chroot heredoc 是否生效
+    rm -f "${ROOTFS_MINIMAL_DIR}"/etc/ssh/ssh_host_* \
+          "${ROOTFS_MINIMAL_DIR}"/etc/machine-id \
+          "${ROOTFS_MINIMAL_DIR}"/var/lib/dbus/machine-id
+    # 显式核验：打包前若仍存在则拒绝打包，避免静默打包出带敏感数据的镜像
+    if compgen -G "${ROOTFS_MINIMAL_DIR}/etc/ssh/ssh_host_*" >/dev/null 2>&1 \
+       || [ -e "${ROOTFS_MINIMAL_DIR}/etc/machine-id" ] \
+       || [ -e "${ROOTFS_MINIMAL_DIR}/var/lib/dbus/machine-id" ]; then
+        echo "错误：打包 ${ROOTFS_MINIMAL_ARCHIVE} 前仍存在 ssh 主机私钥或 machine-id，已终止打包" >&2
+        exit 1
+    fi
+
     tar --xform s:'^./':: -czpf "${ROOTFS_MINIMAL_ARCHIVE}" --exclude="proc/*" --exclude="dev/*" --exclude="sys/*" --exclude="run/*" --xattrs -C "${ROOTFS_MINIMAL_DIR}" .
     echo "rootfs-minimal building completed."
 fi
@@ -266,6 +290,18 @@ EOF
     umount -l "${ROOTFS_CUSTOM_DIR}/dev/pts" 2>/dev/null || true
     umount -l "${ROOTFS_CUSTOM_DIR}/dev" 2>/dev/null || true
     umount -l "${ROOTFS_CUSTOM_DIR}/proc" 2>/dev/null || true
+
+    # 打包前从宿主机侧强制清理敏感数据（ssh 私钥 / machine-id），不依赖 chroot heredoc 是否生效
+    rm -f "${ROOTFS_CUSTOM_DIR}"/etc/ssh/ssh_host_* \
+          "${ROOTFS_CUSTOM_DIR}"/etc/machine-id \
+          "${ROOTFS_CUSTOM_DIR}"/var/lib/dbus/machine-id
+    # 显式核验：打包前若仍存在则拒绝打包，避免静默打包出带敏感数据的镜像
+    if compgen -G "${ROOTFS_CUSTOM_DIR}/etc/ssh/ssh_host_*" >/dev/null 2>&1 \
+       || [ -e "${ROOTFS_CUSTOM_DIR}/etc/machine-id" ] \
+       || [ -e "${ROOTFS_CUSTOM_DIR}/var/lib/dbus/machine-id" ]; then
+        echo "错误：打包 ${ROOTFS_CUSTOM_ARCHIVE} 前仍存在 ssh 主机私钥或 machine-id，已终止打包" >&2
+        exit 1
+    fi
 
     tar --xform s:'^./':: -czpf "${ROOTFS_CUSTOM_ARCHIVE}" --exclude="proc/*" --exclude="dev/*" --exclude="sys/*" --exclude="run/*" --xattrs -C "${ROOTFS_CUSTOM_DIR}" .
     echo "rootfs-custom building completed."
@@ -336,6 +372,18 @@ EOF
     umount -l "${ROOTFS_FULL_DIR}/dev/pts" 2>/dev/null || true
     umount -l "${ROOTFS_FULL_DIR}/dev" 2>/dev/null || true
     umount -l "${ROOTFS_FULL_DIR}/proc" 2>/dev/null || true
+
+    # 打包前从宿主机侧强制清理敏感数据（ssh 私钥 / machine-id），不依赖 chroot heredoc 是否生效
+    rm -f "${ROOTFS_FULL_DIR}"/etc/ssh/ssh_host_* \
+          "${ROOTFS_FULL_DIR}"/etc/machine-id \
+          "${ROOTFS_FULL_DIR}"/var/lib/dbus/machine-id
+    # 显式核验：打包前若仍存在则拒绝打包，避免静默打包出带敏感数据的镜像
+    if compgen -G "${ROOTFS_FULL_DIR}/etc/ssh/ssh_host_*" >/dev/null 2>&1 \
+       || [ -e "${ROOTFS_FULL_DIR}/etc/machine-id" ] \
+       || [ -e "${ROOTFS_FULL_DIR}/var/lib/dbus/machine-id" ]; then
+        echo "错误：打包 ${ROOTFS_FULL_ARCHIVE} 前仍存在 ssh 主机私钥或 machine-id，已终止打包" >&2
+        exit 1
+    fi
 
     tar --xform s:'^./':: -czpf "${ROOTFS_FULL_ARCHIVE}" --exclude="proc/*" --exclude="dev/*" --exclude="sys/*" --exclude="run/*" --xattrs -C "${ROOTFS_FULL_DIR}" .
     echo "rootfs-full building completed."
