@@ -1,0 +1,24 @@
+# /etc/ntpsec/ntp.conf, configuration for ntpd; see ntp.conf(5) for help
+
+driftfile /var/lib/ntpsec/ntp.drift
+leapfile /usr/share/zoneinfo/leap-seconds.list
+
+# 国内 NTP 服务器（构建时内置，替代 Debian 默认 pool）
+server ntp.aliyun.com iburst
+server ntp1.aliyun.com iburst
+server ntp.tencent.com iburst
+server cn.pool.ntp.org iburst
+
+tos maxclock 11
+tos minclock 4 minsane 3
+
+# Access control configuration; see /usr/share/doc/ntpsec-doc/html/accopt.html for
+# details.  The web page <http://support.ntp.org/bin/view/Support/AccessRestrictions>
+# might also be helpful.
+
+# By default, exchange time with everybody, but don't allow configuration.
+restrict default kod nomodify noquery limited
+
+# Local users may interrogate the ntp server more closely.
+restrict 127.0.0.1
+restrict ::1

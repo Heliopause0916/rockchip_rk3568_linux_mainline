@@ -3,7 +3,7 @@
 > 项目：rockchip_rk3568_linux_mainline
 > 路线：主线内核 6.1.106 + debootstrap 自建 Debian（rootfs 已升级到 trixie / Debian 13）
 > 目标机器：Photonicat 一代（RK3568）
-> 状态：**已完成（Phase 0/1/2 均已实施并上板实证通过）——本源规划作为落地记录留存，不再处于规划期**
+> 状态：**最终闭环（2026-08-11）——Phase 0/1/2 + 三项开放项（板温 / feed_interval / 时间对齐）全部实机解决，本文档作为落地记录留存，不再处于规划期**
 
 ---
 
@@ -342,9 +342,23 @@
 
 | # | 项 | 状态 / 说明 |
 |---|----|-------------|
-| ① | 板温/风扇读 0 | 判定为 MCU 未上报有效温度字节（data[17]=100），非内核 bug，优先级低；如需真实板温另行追查（临时 printk 抓帧判别） |
-| ② | `feed_interval` 实现值=10 | 规划注释写 `{60,60,5}`，实测实现值为 10，是否改回 5 待上层拍板 |
+| ① | 板温/风扇读 0 | ~~判定为 MCU 未上报有效温度字节（data[17]=100），非内核 bug~~ → **已解决（2026-08-11）**：根因=内核温度守卫 `>=20` 过严 + 换算 `-100` 错位，实机 `len=18` / `data[17]=66~70`；改为守卫 `>=18` + 换算 `-40` 后 `pcat_pm_hwmon_temp_mb` 实测 37°C。详见「五.六」 |
+| ② | `feed_interval` 实现值=10 | ~~是否改回 5 待上层拍板~~ → **已解决（2026-08-11）**：对齐官方用户态 v1（`watchdog_timeout_set(5)`），宏 10→5，uptime 正常无复位。详见「五.六」 |
 | ③ | modem 仍用 libgpiod | 未迁移 DTS `rfkill-gpio`，与 v2 不完全同构，属范围外、非阻塞 |
+
+---
+
+## 五.六、开放项收尾结论（2026-08-11）
+
+> 2026-08-11 针对前一日遗留的 3 项开放项（板温 / feed_interval / 时间对齐）做了定向排查与修复，全部实机验证通过并收尾。
+
+| # | 开放项 | 根因排查 | 修复 | 实机验证 |
+|---|--------|----------|------|----------|
+| ① | 板温 / 风扇读 0 | 内核驱动温度守卫 `data_len>=20` 过严、且温度换算错误用二代 `-100` 偏移；实机抓帧为 `len=18`（一代完整帧，payload 到 data[17]），温度字节 `data[17]=66~70`，换算应为一代 `-40`（66-40=26°C 合理） | 温度守卫 `>=20`→`>=18`；换算 `-100`→`-40` | `pcat_pm_hwmon_temp_mb` 实测 **37000（37°C）**，不再为 0 |
+| ② | `feed_interval` 实现值=10 | 规划注释写 `{60,60,5}`，内核宏实现为 10；官方用户态 v1 (`pmu-manager.c` L1659 `watchdog_timeout_set(5)`) 即走 5 | `PCAT_PM_WATCHDOG_DEFAULT_INTERVAL` 10→5 | uptime 持续运行无 60s/120s 复位 |
+| ③ | 时间对齐（开机时钟卡在陈旧值 `2026-04-14`, 靠 ntpsec 事后约 1 分钟拨正） | `RTC_HCTOSYS`（约 7.8s）早于 MCU 首个 `0x7` 状态帧（约 8.7s），`read_time` 因 `status_report_received` 尚未置位返回 `-ENODATA`，hctosys 播种失败 → 每次开机时钟陈旧 | **方案 B**：`pcat_pm_status_report_parse` 收首帧、缓存 MCU RTC 字段后，若系统时钟落后 MCU RTC >300s 则 `do_settimeofday64()` 一次性播种（`clock_seeded` 只播一次、绝不倒退、不与 ntpsec 冲突）；新增 `struct pcat_pm_data::bool clock_seeded` 及 `<linux/time.h>/<linux/time64.h>/<linux/timekeeping.h>` include | dmesg 见 `pcat-pm: seeded system clock from MCU RTC (sec 1786417339)`（开机约 9s 即播种）；ntpsec 后续仅 `time stepped by 0.43s`（不再有 119 天大步进），服务 Active since 即正确时间，彻底消除开机陈旧窗口 |
+
+**结论**：3 项开放项全部关闭，photonicat-pm 内核集成工作正式告一段落。当前内核改动累积：宏 feed_interval=5、read_time 有效性门禁、温度守卫 18 + `-40` 偏移、首帧 `do_settimeofday64()` 播种。
 
 ---
 
@@ -397,4 +411,4 @@
 
 ---
 
-*文档状态：Phase 0/1/2 已全部实施并上板实证通过。除下方「遗留开放项」外，本文档中标注 [待验证] 的关键项均已在实机确认。*
+*文档状态：最终闭环（2026-08-11）。Phase 0/1/2 全部实施并上板实证通过；遗留开放项 ① 板温、② feed_interval、③ 时间对齐均已实机解决（见「五.六」）。本规划作为落地记录留存，不再处于规划期。*

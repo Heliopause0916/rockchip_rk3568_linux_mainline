@@ -6,6 +6,7 @@ DEB_DISTRO="trixie"
 PREINSTALL_PACKAGES="nano,build-essential,ca-certificates"
 OVERLAY_DIR="overlay-debian"
 SOURCES_LIST_FILE="sources.list.debian"
+NTPSEC_CONF_FILE="ntp.conf.debian"
 
 ROOTFS_DIR="rootfs-debian"
 ROOTFS_BASE_ARCHIVE="rootfs-debian-base.tar.gz"
@@ -122,6 +123,8 @@ if [ "${BUILD_MINIMAL}" = "1" ] && [ ! -f "${ROOTFS_MINIMAL_ARCHIVE}" ]; then
     fi
 
     cp -f "${SOURCES_LIST_FILE}" "${ROOTFS_MINIMAL_DIR}/etc/apt/sources.list"
+    mkdir -p "${ROOTFS_MINIMAL_DIR}/etc/ntpsec"
+    cp -f "${NTPSEC_CONF_FILE}" "${ROOTFS_MINIMAL_DIR}/etc/ntpsec/ntp.conf"
     rm -f "${ROOTFS_MINIMAL_DIR}/etc/resolv.conf"
     cp /etc/resolv.conf "${ROOTFS_MINIMAL_DIR}/etc/resolv.conf"
 
@@ -167,12 +170,13 @@ echo "tmpfs /tmp tmpfs defaults,nodev,nosuid,size=512M,mode=1777 0 0" >> /etc/fs
 apt-get install -fy sudo fakeroot devscripts cmake binfmt-support dh-make \
     dh-exec device-tree-compiler bc cpio parted dosfstools mtools alsa-utils \
     libssl-dev dpkg-dev build-essential libgpiod3 \
-    libjson-c5 libusb-1.0-0 nano network-manager i2c-tools ntpsec git \
+    libjson-c5 libusb-1.0-0 nano network-manager i2c-tools ntpsec ntpsec-ntpdig git \
     usbutils pciutils htop openssh-server build-essential autotools-dev \
     meson libglib2.0-dev libjson-c-dev libgpiod-dev libusb-1.0-0-dev gdb \
     p7zip-full net-tools iotop wget firmware-linux-free firmware-linux-nonfree \
     firmware-misc-nonfree firmware-atheros firmware-iwlwifi firmware-brcm80211 \
-    bridge-utils systemd-zram-generator linux-libc-dev
+    bridge-utils systemd-zram-generator linux-libc-dev \
+    curl rsync file zip unzip dnsutils iputils-ping lsof strace tcpdump vim
 
 apt-get clean
 

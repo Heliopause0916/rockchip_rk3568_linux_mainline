@@ -23,6 +23,9 @@
 #include <linux/timer.h>
 #include <linux/power_supply.h>
 #include <linux/rtc.h>
+#include <linux/time.h>
+#include <linux/time64.h>
+#include <linux/timekeeping.h>
 #include <linux/hwmon.h>
 #include <linux/miscdevice.h>
 #include <linux/thermal.h>
@@ -35,8 +38,9 @@
  * 完整规划语义为 {60, 60, 5}（timeout_boot=60、force-poweroff-timeout=60、
  * feed_interval=5）。当前 feed_interval 保持默认 10 未改为 5：该值直接决定
  * MCU 侧看门狗喂狗节奏，属于 MCU 行为变更，未经 MCU 固件侧确认前保守不改。
- * 如需与规划对齐，请先核对 MCU 侧对此 interval 的处理逻辑再调整本宏。 */
-#define PCAT_PM_WATCHDOG_DEFAULT_INTERVAL 10
+ * 如需与规划对齐，请先核对 MCU 侧对此 interval 的处理逻辑再调整本宏。
+ * 2026-08-10 已核实官方用户态 pcat-manager v1@6f16e4a 启动默认即为 5（pmu-manager.c L1659 watchdog_timeout_set(5)，L1733 {60,60,5}），故由 10 改回 5 以对齐官方行为。 */
+#define PCAT_PM_WATCHDOG_DEFAULT_INTERVAL 5
 
 typedef enum {
 	PCAT_PM_COMMAND_HEARTBEAT = 0x1,
@@ -145,6 +149,12 @@ struct pcat_pm_data {
 	struct mutex mutex;
 	u64 status_report_timestamp;
 	u64 status_report_timeout_warn_timestamp;
+	/* 已收到过至少一帧有效状态上报：probe 时(devm_kzalloc)为 false，
+	 * 仅 pcat_pm_status_report_parse 解析到合法状态帧后置 true。
+	 * 用作 RTC 有效性门禁，避免启动期把陈旧/未初始化时间灌给上层。 */
+	bool status_report_received;
+	/* 方案B：是否已用 MCU RTC 播种过系统时钟（只播一次，之后交 ntpsec 精调）。 */
+	bool clock_seeded;
 	unsigned int battery_technology;
 	int battery_design_uwh;
 	int battery_design_min_uv;
@@ -491,8 +501,8 @@ static void pcat_pm_status_report_parse(struct pcat_pm_data *pm_data,
 	gpio_input = data[4] | ((u16)data[5] << 8);
 	gpio_output = data[6] | ((u16)data[7] << 8);
 
-	if (data_len >= 20) {
-		temp = (int)data[17] - 100;
+	if (data_len >= 18) {
+		temp = (int)data[17] - 40;
 		battery_current_raw = data[18] + ((u16)data[19] << 8);
 		battery_current = (s16)battery_current_raw;
 		on_battery = (battery_current > 0);
@@ -534,6 +544,8 @@ static void pcat_pm_status_report_parse(struct pcat_pm_data *pm_data,
 	}
 	
 	pm_data->status_report_timestamp = ktime_get_boottime_ns();
+	/* 已解析到一帧完整(>=16B)状态上报，置位有效性标志供 RTC 读取门禁使用。 */
+	pm_data->status_report_received = true;
 	
 	mutex_lock(&pm_data->mutex);
 	pm_data->battery_voltage_now = battery_voltage * 1000;
@@ -558,6 +570,38 @@ static void pcat_pm_status_report_parse(struct pcat_pm_data *pm_data,
 	pm_data->gs_ready = gs_ready;
 	pm_data->fan_speed = fan_speed;
 	mutex_unlock(&pm_data->mutex);
+
+	/* 方案B：hctosys(约7.8s)早于 MCU 首个状态帧(约8.7s)播种系统时间必然失败
+	 * (dmesg: "hctosys: unable to read the hardware clock")，故每次开机时钟陈旧。
+	 * 此处已在首帧缓存到 MCU RTC 字段，若发现系统时钟仍明显落后于 RTC(>5分钟)，
+	 * 用 MCU RTC 一次性拨正内核墙钟；只播种一次，之后交 ntpsec 精调。仅在 RTC
+	 * 明显在前(怀疑系统陈旧)时播种，绝不把系统时钟往回倒退干扰 NTP。 */
+	if (!pm_data->clock_seeded) {
+		pm_data->clock_seeded = true;
+
+		if (pm_data->rtc_year >= 2000 && pm_data->rtc_year <= 2099 &&
+		    pm_data->rtc_month <= 11 &&
+		    pm_data->rtc_day >= 1 && pm_data->rtc_day <= 31 &&
+		    pm_data->rtc_hour <= 23 &&
+		    pm_data->rtc_min <= 59 &&
+		    pm_data->rtc_sec <= 60) {
+			struct timespec64 rtc_ts, now_ts;
+
+			rtc_ts.tv_sec = mktime64(pm_data->rtc_year,
+				(pm_data->rtc_month + 1) & 0xff,
+				pm_data->rtc_day, pm_data->rtc_hour,
+				pm_data->rtc_min, pm_data->rtc_sec);
+			rtc_ts.tv_nsec = 0;
+
+			ktime_get_real_ts64(&now_ts);
+			if (rtc_ts.tv_sec > now_ts.tv_sec + 300) {
+				do_settimeofday64(&rtc_ts);
+				dev_info(&pm_data->serdev->dev,
+					"pcat-pm: seeded system clock from MCU RTC (sec %lld)\n",
+					(long long)rtc_ts.tv_sec);
+			}
+		}
+	}
 }
 
 static void pcat_pm_uart_cmd_exec(struct pcat_pm_data *pm_data,
@@ -897,6 +941,19 @@ static int pcat_pm_rtc_read_time(struct device *dev, struct rtc_time *t)
 	
 	serdev = container_of(dev, struct serdev_device, dev);
 	pm_data = serdev_device_get_drvdata(serdev);
+
+	/* 未收到过有效状态帧，或缓存 RTC 字段越界：返回 -ENODATA，避免把
+	 * 陈旧/未初始化时间灌给上层（systemd/hwclock）。
+	 * 判据：status_report_received 仅完整状态帧解析后置位；rtc_month 存储
+	 * 为 0 基（data[10]-1，read_time 直接作 tm_mon），合法范围 0..11。 */
+	if (!pm_data->status_report_received ||
+	    pm_data->rtc_year < 2000 || pm_data->rtc_year > 2099 ||
+	    pm_data->rtc_month > 11 ||
+	    pm_data->rtc_day < 1 || pm_data->rtc_day > 31 ||
+	    pm_data->rtc_hour > 23 ||
+	    pm_data->rtc_min > 59 ||
+	    pm_data->rtc_sec > 60)
+		return -ENODATA;
 
 	mutex_lock(&pm_data->mutex);
 	t->tm_year = pm_data->rtc_year - 1900;
