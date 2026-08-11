@@ -71,6 +71,12 @@ make O=build rockchip/rk3568-photonicat.dtb
 cp -v build/arch/arm64/boot/Image deploy/
 cp -v build/arch/arm64/boot/dts/rockchip/rk3568-photonicat.dtb deploy/
 make O=build modules_install INSTALL_MOD_PATH="${WORKDIR}/kernel/deploy/modules" INSTALL_MOD_STRIP=1
+# modules_install 由内核 Makefile.modinst 在 lib/modules/${KREL}/ 下自动创建
+# build -> $(CURDIR) 链接，$(CURDIR) 为宿主机绝对路径，会随 kmods.tar.gz 部署上板
+# 泄露宿主机路径；此处改为指向中性路径 /usr/src/<KREL>（板上可能不存在，为 dangling 链接）。
+KREL="$(cat build/include/config/kernel.release)"
+rm -f "${WORKDIR}/kernel/deploy/modules/lib/modules/${KREL}/build"
+ln -s "/usr/src/${KREL}" "${WORKDIR}/kernel/deploy/modules/lib/modules/${KREL}/build"
 tar --owner=0 --group=0 --xform s:'^./':: -czf deploy/kmods.tar.gz -C "${WORKDIR}/kernel/deploy/modules" .
 # 生成供外部模块编译（DKMS / 外置模块）所需的构建树产物。
 # modules_prepare 在已 config 的 O=build 上生成 include/generated/autoconf.h、

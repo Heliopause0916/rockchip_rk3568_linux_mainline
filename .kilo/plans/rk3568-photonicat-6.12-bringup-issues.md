@@ -12,7 +12,7 @@
 | # | 问题 | 类别 | 严重度 | 状态 |
 |---|---|---|---|---|
 | 1 | eth1（gmac0/SGMII）无法启动 | 内核 | 高 | 待移植 PCS（见 SGMII 专项） |
-| 2 | WiFi（ath10k QCA9377）缺固件 | rootfs | 高 | 待补固件 |
+| 2 | WiFi（ath10k QCA9377） | rootfs | 高 | 已验收正常（2026-08-11 上板实测） |
 | 3 | PCIe combphy 上电锁失败 | 内核 | 中 | 待确认是否使用 |
 | 4 | Bluetooth hci0 帧重组失败 | 内核/固件 | 低 | 待观察 |
 | 5 | panfrost 冷却设备注册失败 | 内核 | 低 | 良性 |
@@ -31,12 +31,12 @@
 - 处置：移植 6.1 BSP 的 SGMII/XPCS PCS 支持到 6.12（独立专项，见 `.kilo/plans/1786453731168-rk3568-gmac0-sgmii-restore-plan.md`），需另编内核并上板实测。
 - 状态：待移植。
 
-### 2. WiFi（ath10k QCA9377）缺固件（高，rootfs）
-- 现象：`ath10k_sdio ... failed to fetch board data for bus=sdio,vendor=0271,device=0701,... from ath10k/QCA9377/hw1.0/board-2.bin`。wlan0 DOWN。
-- 根因：rootfs 缺少 ath10k QCA9377 固件文件（`/lib/firmware/ath10k/QCA9377/hw1.0/` 下的 `firmware-5.bin`、`board-2.bin` 等）。
-- 影响：无线网卡不可用。
-- 处置：在 rootfs 打包中加入 ath10k/QCA9377 固件（firmware-ath10k / 对应 deb 或手动落位），并核验文件路径与版本。
-- 状态：待补固件。
+### 2. WiFi（ath10k QCA9377）（高，rootfs）✅ 已解决
+- 现象（旧）：`ath10k_sdio ... failed to fetch board data for bus=sdio,vendor=0271,device=0701,... from ath10k/QCA9377/hw1.0/board-2.bin`，曾误判为缺固件。
+- 根因澄清：rootfs 已通过 `firmware-atheros` 包（non-free-firmware 源）正确供给固件，`/lib/firmware/ath10k/QCA9377/hw1.0/` 下 `firmware-5.bin`、`board-2.bin`、`board.bin` 等均齐全。`failed to fetch board data from board-2.bin` 是 QCA9377 SDIO 的已知良性信息：board-2.bin 无匹配该 SDIO 变体的条目，驱动自动回退到片上 OTP 校准（dmesg `cal otp`），不影响功能。
+- 验收（2026-08-11 上板实测）：驱动完整初始化（`firmware ver WLAN.TF.1.1.1-00061-QCATFSWPZ-1`、`htt-ver 3.32 wmi-op 4 htt-op 3 cal otp max-sta 32`）；`wlan0` 注册成功且 MAC 合法；`nmcli dev wifi list` 可扫描 2.4G/5G 大量 AP（GL-AXT1800-Steven-5G 信号 94%）。
+- 处置：无需补固件。另留意板上第二块 PCIe WiFi 为 wcn6855（ath11k_pci，wlan1）；`cfg80211: regulatory.db malformed` 为内核与 crda 版本不匹配的合规信息缺失，不阻塞连接，若遇受限信道再单独处理。
+- 状态：已验收正常。
 
 ### 3. PCIe combphy 上电锁失败（中，内核）
 - 现象：`phy-fe8c0000.phy: rockchip_p3phy_rk3568_init: lock failed 0x6890000, check input refclk and power supply`、`phy init failed --> -110`、`rockchip-dw-pcie 3c0800000.pcie: probe with driver ... failed with error -110`。

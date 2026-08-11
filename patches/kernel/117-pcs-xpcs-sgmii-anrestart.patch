@@ -1,0 +1,88 @@
+From: Coia Prant <coiaprant@gmail.com>
+Subject: [PATCH] net: pcs: xpcs: add ANRESTART support for SGMII link recovery
+
+On some hardware using the DesignWare XPCS IP (e.g., RK3568 MAC side
+SGMII), the PCS does not automatically restart auto-negotiation when the
+link goes down and comes back up. Without an explicit ANRESTART, the link
+stays down forever.
+
+Add BMCR_ANRESTART in two places:
+1. In xpcs_config_aneg_c37_sgmii(), when starting AN, clear the CL37 AN
+   complete status interrupt and trigger ANRESTART to initiate a fresh
+   negotiation.
+2. In xpcs_get_state_c37_sgmii(), when the link is down and AN completion
+   is detected, clear the interrupt and trigger ANRESTART to restart the
+   negotiation process.
+
+This is a backport of upstream RK3568 XPCS series patch 06 to the 6.12
+tree. The 6.12 adaptation notes:
+- 6.12 enables C37 AN through DW_VR_MII_MMD_CTRL/AN_CL37_EN rather than
+  the MII_BMCR ANENABLE write used by the original v2 patch, so the
+  ANRESTART is issued as a separate VEND2 MII_BMCR access.
+- 6.12 has no xpcs_modify(); it provides xpcs_modify_changed(), which is
+  used here to read-modify-write only the BMCR_ANRESTART bit so the
+  remaining BMCR bits are preserved.
+- MII_BMCR and BMCR_ANRESTART come from <linux/mii.h> (reached via
+  <linux/phy.h>, already included by this file; BMCR_ANRESTART is already
+  used in xpcs_an_restart()).
+
+Signed-off-by: Coia Prant <coiaprant@gmail.com>
+---
+ drivers/net/pcs/pcs-xpcs.c | 17 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/net/pcs/pcs-xpcs.c b/drivers/net/pcs/pcs-xpcs.c
+index 0337e2bcc0125..28e98449e8ac2 100644
+--- a/drivers/net/pcs/pcs-xpcs.c
++++ b/drivers/net/pcs/pcs-xpcs.c
+@@ -731,10 +731,33 @@ static int xpcs_config_aneg_c37_sgmii(struct dw_xpcs *xpcs,
+ 	if (ret < 0)
+ 		return ret;
+ 
++	/* Clear CL37 AN complete status */
++	ret = xpcs_write(xpcs, MDIO_MMD_VEND2, DW_VR_MII_AN_INTR_STS, 0);
++	if (ret < 0)
++		return ret;
++
+ 	if (neg_mode == PHYLINK_PCS_NEG_INBAND_ENABLED)
+ 		ret = xpcs_write(xpcs, MDIO_MMD_VEND2, DW_VR_MII_MMD_CTRL,
+ 				 mdio_ctrl | AN_CL37_EN);
+ 
++	/*
++	 * The DW XPCS IP (e.g. on the RK3568 MAC-side SGMII) does not
++	 * automatically restart auto-negotiation when the link drops and
++	 * comes back, leaving the link down forever. Issue an explicit
++	 * ANRESTART (standard C22 MII_BMCR bit, accessed via the VEND2 MMD)
++	 * to initiate a fresh negotiation. The original v2 patch folded this
++	 * into the same MII_BMCR write that also set ANENABLE, but 6.12
++	 * enables C37 AN through DW_VR_MII_MMD_CTRL/AN_CL37_EN, so the
++	 * restart is issued here as a separate read-modify-write that only
++	 * sets the BMCR_ANRESTART bit and preserves the surrounding bits.
++	 */
++	if (neg_mode == PHYLINK_PCS_NEG_INBAND_ENABLED) {
++		ret = xpcs_modify_changed(xpcs, MDIO_MMD_VEND2, MII_BMCR,
++					  BMCR_ANRESTART, BMCR_ANRESTART);
++		if (ret < 0)
++			return ret;
++	}
++
+ 	return ret;
+ }
+ 
+@@ -1010,9 +1033,14 @@ static int xpcs_get_state_c37_sgmii(struct dw_xpcs *xpcs,
+ 	}
+ 
+ 	/* Clear AN complete status or interrupt */
+-	if (state->an_complete)
++	if (state->an_complete) {
+ 		xpcs_write(xpcs, MDIO_MMD_VEND2, DW_VR_MII_AN_INTR_STS, 0);
+ 
++		/* Initiate the next round of AN */
++		xpcs_modify_changed(xpcs, MDIO_MMD_VEND2, MII_BMCR,
++				    BMCR_ANRESTART, BMCR_ANRESTART);
++	}
++
+ 	return 0;
+ }
+ 
+--- 
+2.43.0

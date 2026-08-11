@@ -1,0 +1,155 @@
+From: Coia Prant <coiaprant@gmail.com>
+Subject: [PATCH] net: stmmac: dwmac-rk: add SGMII support for RK3568
+
+Backport of upstream "net: stmmac: dwmac-rk: add SGMII support for
+RK3568" (08/10 of the RK3568 XPCS series) adapted to the 6.12
+dwmac-rk.c driver structure. Select the Rockchip XPCS platform driver
+and wire up the set_to_sgmii GRF configuration plus the phylink PCS
+callbacks (pcs_init/pcs_exit/select_pcs) needed to bring up GMAC0 in
+SGMII mode using the on-SoC DesignWare XPCS.
+
+--- a/drivers/net/ethernet/stmicro/stmmac/dwmac-rk.c
++++ b/drivers/net/ethernet/stmicro/stmmac/dwmac-rk.c
+@@ -19,6 +19,7 @@
+ #include <linux/delay.h>
+ #include <linux/mfd/syscon.h>
+ #include <linux/regmap.h>
++#include <linux/pcs/pcs-xpcs-rk.h>
+ #include <linux/pm_runtime.h>
+ 
+ #include "stmmac_platform.h"
+@@ -28,6 +29,7 @@
+ 	void (*set_to_rgmii)(struct rk_priv_data *bsp_priv,
+ 			     int tx_delay, int rx_delay);
+ 	void (*set_to_rmii)(struct rk_priv_data *bsp_priv);
++	void (*set_to_sgmii)(struct rk_priv_data *bsp_priv);
+ 	void (*set_rgmii_speed)(struct rk_priv_data *bsp_priv, int speed);
+ 	void (*set_rmii_speed)(struct rk_priv_data *bsp_priv, int speed);
+ 	void (*set_clock_selection)(struct rk_priv_data *bsp_priv, bool input,
+@@ -1024,6 +1026,7 @@
+ 		(GRF_BIT(4) | GRF_CLR_BIT(5) | GRF_CLR_BIT(6))
+ #define RK3568_GMAC_PHY_INTF_SEL_RMII	\
+ 		(GRF_CLR_BIT(4) | GRF_CLR_BIT(5) | GRF_BIT(6))
++#define RK3568_GMAC_GMII_MODE			GRF_BIT(7)
+ #define RK3568_GMAC_FLOW_CTRL			GRF_BIT(3)
+ #define RK3568_GMAC_FLOW_CTRL_CLR		GRF_CLR_BIT(3)
+ #define RK3568_GMAC_RXCLK_DLY_ENABLE		GRF_BIT(1)
+@@ -1076,6 +1079,16 @@
+ 	regmap_write(bsp_priv->grf, con1, RK3568_GMAC_PHY_INTF_SEL_RMII);
+ }
+ 
++static void rk3568_set_to_sgmii(struct rk_priv_data *bsp_priv)
++{
++	u32 con1;
++
++	con1 = (bsp_priv->id == 1) ? RK3568_GRF_GMAC1_CON1 :
++				     RK3568_GRF_GMAC0_CON1;
++
++	regmap_write(bsp_priv->grf, con1, RK3568_GMAC_GMII_MODE);
++}
++
+ static void rk3568_set_gmac_speed(struct rk_priv_data *bsp_priv, int speed)
+ {
+ 	struct clk *clk_mac_speed = bsp_priv->clks[RK_CLK_MAC_SPEED].clk;
+@@ -1107,6 +1120,7 @@
+ static const struct rk_gmac_ops rk3568_ops = {
+ 	.set_to_rgmii = rk3568_set_to_rgmii,
+ 	.set_to_rmii = rk3568_set_to_rmii,
++	.set_to_sgmii = rk3568_set_to_sgmii,
+ 	.set_rgmii_speed = rk3568_set_gmac_speed,
+ 	.set_rmii_speed = rk3568_set_gmac_speed,
+ 	.regs_valid = true,
+@@ -1884,6 +1898,10 @@
+ 		if (!bsp_priv->ops->set_to_rmii)
+ 			return -EINVAL;
+ 		break;
++	case PHY_INTERFACE_MODE_SGMII:
++		if (!bsp_priv->ops->set_to_sgmii)
++			return -EINVAL;
++		break;
+ 	default:
+ 		dev_err(&bsp_priv->pdev->dev,
+ 			"unsupported interface %d", bsp_priv->phy_iface);
+@@ -1927,6 +1945,10 @@
+ 		dev_info(dev, "init for RMII\n");
+ 		bsp_priv->ops->set_to_rmii(bsp_priv);
+ 		break;
++	case PHY_INTERFACE_MODE_SGMII:
++		dev_info(dev, "init for SGMII\n");
++		bsp_priv->ops->set_to_sgmii(bsp_priv);
++		break;
+ 	default:
+ 		dev_err(dev, "NO interface defined!\n");
+ 	}
+@@ -1978,6 +2000,43 @@
+ 	}
+ }
+ 
++static int rk_pcs_init(struct stmmac_priv *priv)
++{
++	struct device_node *np = priv->device->of_node;
++	struct device_node *pcs_node;
++	struct dw_xpcs *xpcs;
++
++	pcs_node = of_parse_phandle(np, "pcs-handle", 0);
++	if (!pcs_node)
++		return -ENODEV;
++
++	xpcs = xpcs_rk_create(priv->device, pcs_node);
++	of_node_put(pcs_node);
++	if (IS_ERR(xpcs))
++		return PTR_ERR(xpcs);
++
++	priv->hw->xpcs = xpcs;
++	return 0;
++}
++
++static void rk_pcs_exit(struct stmmac_priv *priv)
++{
++	if (!priv->hw->xpcs)
++		return;
++
++	xpcs_destroy(priv->hw->xpcs);
++	priv->hw->xpcs = NULL;
++}
++
++static struct phylink_pcs *rk_select_pcs(struct stmmac_priv *priv,
++					 phy_interface_t interface)
++{
++	if (!priv->hw->xpcs)
++		return NULL;
++
++	return &priv->hw->xpcs->pcs;
++}
++
+ static int rk_gmac_probe(struct platform_device *pdev)
+ {
+ 	struct plat_stmmacenet_data *plat_dat;
+@@ -2006,6 +2065,17 @@
+ 		plat_dat->has_gmac = true;
+ 	plat_dat->fix_mac_speed = rk_fix_speed;
+ 
++	if (plat_dat->phy_interface == PHY_INTERFACE_MODE_SGMII) {
++		/* SGMII clock always runs at 125 MHz */
++		if (plat_dat->mdio_bus_data)
++			plat_dat->mdio_bus_data->default_an_inband = true;
++
++		/* SGMII requires a PCS */
++		plat_dat->pcs_init = rk_pcs_init;
++		plat_dat->pcs_exit = rk_pcs_exit;
++		plat_dat->select_pcs = rk_select_pcs;
++	}
++
+ 	plat_dat->bsp_priv = rk_gmac_setup(pdev, plat_dat, data);
+ 	if (IS_ERR(plat_dat->bsp_priv))
+ 		return PTR_ERR(plat_dat->bsp_priv);
+--- a/drivers/net/ethernet/stmicro/stmmac/Kconfig
++++ b/drivers/net/ethernet/stmicro/stmmac/Kconfig
+@@ -136,6 +136,7 @@
+ 	default ARCH_ROCKCHIP
+ 	depends on OF && (ARCH_ROCKCHIP || COMPILE_TEST)
+ 	select MFD_SYSCON
++	select PCS_XPCS_ROCKCHIP
+ 	help
+ 	  Support for Ethernet controller on Rockchip RK3288 SoC.
+ 

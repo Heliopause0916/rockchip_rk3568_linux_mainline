@@ -1,0 +1,32 @@
+From: Rockchip engineering <engineering@photonicat.local>
+Subject: [PATCH] net: stmmac: keep pcs_init-assigned XPCS in stmmac_pcs_setup()
+
+Backport to 6.12 of the PCS lifetime fix from the upstream RK3568 XPCS
+series ("net: stmmac: move XPCS lifetime management to platform
+drivers", adapted minimal-style for the 6.12 stmmac_mdio.c structure).
+
+In 6.12 stmmac_pcs_setup() still runs priv->hw->xpcs = xpcs; after the
+pcs_init() branch, but the local xpcs variable is NULL in that branch
+(it is only filled by the "pcs-handle" / mdio pcs_mask paths).  As a
+result a platform driver's pcs_init() that already attached an XPCS to
+priv->hw->xpcs gets it silently overwritten to NULL, select_pcs()/the
+PCS is never handed to phylink, and SGMII in-band AN never runs.
+
+Fix by returning early on success inside the pcs_init() branch (with the
+same error path as the common code), so the platform-assigned XPCS is
+preserved.  The pcs_init == NULL paths (pcs-handle / pcs_mask / none)
+keep their exact previous behaviour; only stmmac_pcs_setup() is touched.
+
+--- a/drivers/net/ethernet/stmicro/stmmac/stmmac_mdio.c
++++ b/drivers/net/ethernet/stmicro/stmmac/stmmac_mdio.c
+@@ -508,6 +508,10 @@
+ 
+ 	if (priv->plat->pcs_init) {
+ 		ret = priv->plat->pcs_init(priv);
++		if (ret)
++			return dev_err_probe(priv->device, ret, "No xPCS found\n");
++
++		return 0;
+ 	} else if (fwnode_property_present(devnode, "pcs-handle")) {
+ 		pcsnode = fwnode_find_reference(devnode, "pcs-handle", 0);
+ 		xpcs = xpcs_create_fwnode(pcsnode, mode);

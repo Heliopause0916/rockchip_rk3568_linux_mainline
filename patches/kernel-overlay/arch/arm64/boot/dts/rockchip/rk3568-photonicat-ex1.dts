@@ -271,6 +271,7 @@
 
 &combphy2 {
 	status = "okay";
+	rockchip,sgmii-mac-sel = <0>;
 };
 
 &cpu0 {
@@ -292,8 +293,9 @@
 &gmac0 {
 	assigned-clocks = <&cru SCLK_GMAC0_RX_TX>;
 	assigned-clock-parents = <&gmac0_xpcsclk>;
+	pcs-handle = <&xpcs_mii0>;
+	managed = "in-band-status";
 	power-domains = <&power RK3568_PD_PIPE>;
-	phys = <&combphy2 PHY_TYPE_SGMII>;
 	phy-handle = <&sgmii_phy>;
 	phy-mode = "sgmii";
 	phy-supply = <&vcc_3v3>;
@@ -304,6 +306,16 @@
 	snps,reset-delays-us = <0 20000 100000>;
 	tx_delay = <0xff>;
 	rx_delay = <0xff>;
+	status = "okay";
+};
+
+&xpcs {
+	status = "okay";
+	phys = <&combphy2 PHY_TYPE_SGMII>;
+	phy-names = "serdes";
+};
+
+&xpcs_mii0 {
 	status = "okay";
 };
 
