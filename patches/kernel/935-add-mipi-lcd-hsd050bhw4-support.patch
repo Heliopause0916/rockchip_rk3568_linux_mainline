@@ -1,7 +1,9 @@
---- a/drivers/gpu/drm/panel/panel-ilitek-ili9881c.c	2024-09-06 20:37:36.547663669 +0900
-+++ b/drivers/gpu/drm/panel/panel-ilitek-ili9881c.c	2024-09-08 05:44:21.554774642 +0900
-@@ -663,6 +667,204 @@
- 	ILI9881C_SWITCH_PAGE_INSTR(0),
+# Rewritten for 6.12.103. Add ILI9881C hsd050bhw4 panel support (HSD050BHW4 720x1280 LCD).
+# Applies cleanly to vanilla linux-6.12.103 drivers/gpu/drm/panel/panel-ilitek-ili9881c.c (no .rej).
+--- a/drivers/gpu/drm/panel/panel-ilitek-ili9881c.c
++++ b/drivers/gpu/drm/panel/panel-ilitek-ili9881c.c
+@@ -1223,6 +1223,204 @@
+ 	ILI9881C_COMMAND_INSTR(MIPI_DCS_WRITE_POWER_SAVE, 0x00),
  };
  
 +static const struct ili9881c_instr hsd050bhw4_init[] = {
@@ -205,8 +207,8 @@
  static inline struct ili9881c *panel_to_ili9881c(struct drm_panel *panel)
  {
  	return container_of(panel, struct ili9881c, panel);
-@@ -830,6 +1032,23 @@
- 	.height_mm	= 121,
+@@ -1441,6 +1639,23 @@
+ 	.height_mm	= 151,
  };
  
 +static const struct drm_display_mode hsd050bhw4_default_mode = {
@@ -229,8 +231,8 @@
  static int ili9881c_get_modes(struct drm_panel *panel,
  			      struct drm_connector *connector)
  {
-@@ -953,10 +1174,19 @@
- 		      MIPI_DSI_MODE_LPM | MIPI_DSI_MODE_NO_EOT_PACKET,
+@@ -1590,6 +1805,14 @@
+ 		      MIPI_DSI_CLOCK_NON_CONTINUOUS | MIPI_DSI_MODE_LPM,
  };
  
 +static const struct ili9881c_desc hsd050bhw4_desc = {
@@ -244,7 +246,10 @@
  static const struct of_device_id ili9881c_of_match[] = {
  	{ .compatible = "bananapi,lhr050h41", .data = &lhr050h41_desc },
  	{ .compatible = "feixin,k101-im2byl02", .data = &k101_im2byl02_desc },
+@@ -1597,6 +1820,7 @@
+ 	{ .compatible = "tdo,tl050hdv35", .data = &tl050hdv35_desc },
  	{ .compatible = "wanchanglong,w552946aba", .data = &w552946aba_desc },
+ 	{ .compatible = "ampire,am8001280g", .data = &am8001280g_desc },
 +	{ .compatible = "amorphous,hsd050bhw4", .data = &hsd050bhw4_desc },
  	{ }
  };

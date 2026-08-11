@@ -299,7 +299,6 @@
 	phy-supply = <&vcc_3v3>;
 	pinctrl-names = "default";
 	pinctrl-0 = <&gmac0_miim>;
-	rockchip,xpcs = <&xpcs>;
 	snps,reset-gpio = <&gpio3 RK_PC6 GPIO_ACTIVE_LOW>;
 	snps,reset-active-low;
 	snps,reset-delays-us = <0 20000 100000>;
@@ -631,10 +630,6 @@
 	clock-output-names = "xin32k";
 	pinctrl-0 = <&clk32k_out1>;
 	pinctrl-names = "default";
-	status = "okay";
-};
-
-&xpcs {
 	status = "okay";
 };
 

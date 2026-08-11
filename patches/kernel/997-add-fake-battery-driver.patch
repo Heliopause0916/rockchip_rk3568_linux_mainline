@@ -1,8 +1,11 @@
+# Rewritten for 6.12.103. Add fake battery monitor driver (BATTERY_FAKE, /dev/fake_battery).
+# Applies cleanly to vanilla linux-6.12.103 drivers/power/supply (no .rej).
+# Adds new file drivers/power/supply/fake_battery.c + Kconfig BATTERY_FAKE + Makefile entry.
 --- a/drivers/power/supply/Kconfig
 +++ b/drivers/power/supply/Kconfig
-@@ -918,4 +918,10 @@
- 	  device is off or suspended, the functionality of this driver is
- 	  limited to reporting capacity only.
+@@ -1018,4 +1018,10 @@
+ 	  the state of charge, temperature, cycle count, actual and design
+ 	  capacity, etc.
  
 +config BATTERY_FAKE
 +	tristate "Fake battery monitor driver"
@@ -13,12 +16,12 @@
  endif # POWER_SUPPLY
 --- a/drivers/power/supply/Makefile
 +++ b/drivers/power/supply/Makefile
-@@ -110,3 +110,4 @@
- obj-$(CONFIG_BATTERY_SURFACE)	+= surface_battery.o
- obj-$(CONFIG_CHARGER_SURFACE)	+= surface_charger.o
+@@ -117,3 +117,4 @@
  obj-$(CONFIG_BATTERY_UG3105)	+= ug3105_battery.o
+ obj-$(CONFIG_CHARGER_QCOM_SMB2)	+= qcom_pmi8998_charger.o
+ obj-$(CONFIG_FUEL_GAUGE_MM8013)	+= mm8013.o
 +obj-$(CONFIG_BATTERY_FAKE)	+= fake_battery.o
---- /dev/null
+--- a/drivers/power/supply/fake_battery.c
 +++ b/drivers/power/supply/fake_battery.c
 @@ -0,0 +1,446 @@
 +/*

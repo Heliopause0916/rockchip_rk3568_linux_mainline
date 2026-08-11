@@ -1,18 +1,25 @@
+rockchip: rk356x: add support for new boards
+Rewritten for 6.12.103. Add only the 6 board DTBs not upstream
+(photonicat, mrkaio-m68s, mrkaio-m68s-plus, opc-h66k, opc-h68k,
+opc-h69k). Upstream entries (radxa-e25, nanopi-r5c/r5s, roc-pc,
+fastrhino-r66s/r68s) are not repeated.
+
 --- a/arch/arm64/boot/dts/rockchip/Makefile
 +++ b/arch/arm64/boot/dts/rockchip/Makefile
-@@ -79,3 +79,15 @@ dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3566-so
- dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3568-bpi-r2-pro.dtb
- dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3568-evb1-v10.dtb
- dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3568-rock-3a.dtb
-+dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3568-photonicat.dtb
-+dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3568-radxa-e25.dtb
+@@ -112,10 +112,16 @@
+ dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3568-fastrhino-r66s.dtb
+ dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3568-fastrhino-r68s.dtb
+ dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3568-lubancat-2.dtb
 +dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3568-mrkaio-m68s.dtb
 +dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3568-mrkaio-m68s-plus.dtb
-+dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3568-nanopi-r5c.dtb
-+dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3568-nanopi-r5s.dtb
+ dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3568-mecsbc.dtb
+ dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3568-nanopi-r5c.dtb
+ dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3568-nanopi-r5s.dtb
+ dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3568-odroid-m1.dtb
 +dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3568-opc-h66k.dtb
 +dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3568-opc-h68k.dtb
 +dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3568-opc-h69k.dtb
-+dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3568-r66s.dtb
-+dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3568-r68s.dtb
-+dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3568-roc-pc.dtb
++dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3568-photonicat.dtb
+ dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3568-qnap-ts433.dtb
+ dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3568-radxa-e25.dtb
+ dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3568-roc-pc.dtb

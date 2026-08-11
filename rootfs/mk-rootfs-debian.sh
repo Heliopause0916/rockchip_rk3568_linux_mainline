@@ -97,25 +97,94 @@ cleanup_rootfs_mounts() {
 }
 trap cleanup_rootfs_mounts EXIT
 
+# 全面清理 rootfs 工作目录中的常见缓存，并在打包前显式核验关键残留。
+# 参数1：rootfs 工作目录（宿主机绝对路径）；参数2：归档文件名（仅用于报错信息）。
+# 统一在宿主机侧、tar 打包之前无条件执行，避免依赖 chroot heredoc 是否生效；
+# 全部使用宿主机绝对路径并加 || true 容错，规避“引号内 glob 不展开”/“chroot 内未生效”的坑。
+cleanup_rootfs_caches() {
+    local dir="$1"
+    local archive="$2"
+
+    # 防御：拒绝空目录或根目录，防止误删宿主机文件
+    if [ -z "${dir}" ] || [ "${dir}" = "/" ] || [ "${dir}" = "." ]; then
+        echo "错误：cleanup_rootfs_caches 收到空或危险的目录参数，已安全跳过清理（避免误删宿主机文件）" >&2
+        return 1
+    fi
+
+    # ---- 清理阶段：删除所有常见缓存，但保留运行时必需的系统文件/配置/库 ----
+
+    # apt 缓存：下载的 .deb、partial/lock、以及 debootstrap 产物
+    rm -rf "${dir}/var/cache/apt/archives"/* "${dir}/var/cache/apt/archives/partial" \
+           "${dir}/var/cache/apt/archives/lock" 2>/dev/null || true
+    # apt 包索引：/var/lib/apt/lists 全部清空
+    rm -rf "${dir}/var/lib/apt/lists"/* 2>/dev/null || true
+    # debconf 缓存与 apt 源 cache
+    rm -rf "${dir}/var/cache/debconf"/* "${dir}/var/cache/apt"/* 2>/dev/null || true
+    # man 手册索引（man-db 缓存；locale-archive 属于运行时必需文件，予以保留）
+    rm -rf "${dir}/var/cache/man"/* 2>/dev/null || true
+    # /var/lib/dpkg 之外的其余 dpkg 临时/旧状态说明性残留暂不影响，保留运行时状态
+
+    # 日志与 journal（清空 journal 与 apt 日志，删除 .log/.gz/.xz 轮转文件）
+    rm -rf "${dir}/var/log/journal"/* "${dir}/var/log/apt"/* 2>/dev/null || true
+    find "${dir}/var/log" -type f \( -name '*.log' -o -name '*.gz' -o -name '*.xz' \) \
+        -delete 2>/dev/null || true
+
+    # 临时目录
+    rm -rf "${dir}/tmp"/* "${dir}/var/tmp"/* 2>/dev/null || true
+    # debootstrap 临时脚本
+    rm -rf "${dir}/debootstrap" 2>/dev/null || true
+
+    # 敏感数据：ssh 主机私钥 / machine-id（既删除亦在下方核验）
+    rm -f "${dir}"/etc/ssh/ssh_host_* \
+          "${dir}/etc/machine-id" \
+          "${dir}/var/lib/dbus/machine-id" 2>/dev/null || true
+
+    # 用户缓存：/root 及各普通用户主目录下的 .cache
+    rm -rf "${dir}/root/.cache"/* 2>/dev/null || true
+    for home in "${dir}"/home/*/.cache; do
+        [ -d "$home" ] && rm -rf "$home"/* 2>/dev/null || true
+    done
+
+    # 常见包管理器缓存（若存在）：pip / npm / yarn / cargo / go / gem
+    rm -rf "${dir}/root/.cache/pip" "${dir}/root/.npm" "${dir}/root/.yarn" \
+           "${dir}/root/.cargo/registry" "${dir}/root/.config/pip" \
+           "${dir}/root/.cache/go-build" "${dir}/root/.gem" 2>/dev/null || true
+
+    # Python 字节码缓存（可再生，非运行时必需）
+    find "${dir}/usr/lib" "${dir}/usr/share" "${dir}/usr/local/lib" \
+        -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true
+
+    # ---- 核验阶段：仍存在关键缓存/敏感残留则拒绝打包 ----
+    local fail=0
+    if compgen -G "${dir}/var/cache/apt/archives/*.deb" >/dev/null 2>&1; then
+        echo "错误：打包 ${archive} 前仍存在 .deb 缓存残留" >&2
+        fail=1
+    fi
+    if [ -n "$(ls -A "${dir}/var/lib/apt/lists" 2>/dev/null)" ]; then
+        echo "错误：打包 ${archive} 前仍存在 apt 包索引残留" >&2
+        fail=1
+    fi
+    if compgen -G "${dir}/etc/ssh/ssh_host_*" >/dev/null 2>&1; then
+        echo "错误：打包 ${archive} 前仍存在 ssh 主机私钥残留" >&2
+        fail=1
+    fi
+    if [ -e "${dir}/etc/machine-id" ] || [ -e "${dir}/var/lib/dbus/machine-id" ]; then
+        echo "错误：打包 ${archive} 前仍存在 machine-id 残留" >&2
+        fail=1
+    fi
+    if [ "${fail}" = "1" ]; then
+        echo "错误：打包 ${archive} 前的缓存/敏感残留未被彻底清除，已终止打包" >&2
+        exit 1
+    fi
+}
+
 if [ ! -f "${ROOTFS_BASE_ARCHIVE}" ]; then
     echo "No base rootfs found, start building..."
     debootstrap --arch=arm64 --include="${PREINSTALL_PACKAGES}" "${DEB_DISTRO}" "${ROOTFS_DIR}" "${DEB_REPO}"
 
-    # base 阶段最小清理：清 apt 缓存与包索引，删除 debootstrap 临时脚本
-    rm -rf "${ROOTFS_DIR}"/var/cache/apt/archives/* "${ROOTFS_DIR}"/var/lib/apt/lists/*
+    # 删除 debootstrap 临时脚本（其余全面缓存清理 + 显式核验统一在打包前宿主机侧执行）
     rm -rf "${ROOTFS_DIR}/debootstrap" || true
-
-    # 打包前从宿主机侧强制清理敏感数据（ssh 私钥 / machine-id），不依赖 chroot heredoc 是否生效
-    rm -f "${ROOTFS_DIR}"/etc/ssh/ssh_host_* \
-          "${ROOTFS_DIR}"/etc/machine-id \
-          "${ROOTFS_DIR}"/var/lib/dbus/machine-id
-    # 显式核验：打包前若仍存在则拒绝打包，避免静默打包出带敏感数据的镜像
-    if compgen -G "${ROOTFS_DIR}/etc/ssh/ssh_host_*" >/dev/null 2>&1 \
-       || [ -e "${ROOTFS_DIR}/etc/machine-id" ] \
-       || [ -e "${ROOTFS_DIR}/var/lib/dbus/machine-id" ]; then
-        echo "错误：打包 ${ROOTFS_BASE_ARCHIVE} 前仍存在 ssh 主机私钥或 machine-id，已终止打包" >&2
-        exit 1
-    fi
+    cleanup_rootfs_caches "${ROOTFS_DIR}" "${ROOTFS_BASE_ARCHIVE}"
 
     tar --xform s:'^./':: -czpf "${ROOTFS_BASE_ARCHIVE}" --xattrs -C "${ROOTFS_DIR}" .
     echo "Base rootfs building completed."
@@ -185,8 +254,8 @@ apt-get install -fy sudo fakeroot devscripts cmake binfmt-support dh-make \
     libjson-c5 libusb-1.0-0 nano network-manager i2c-tools ntpsec ntpsec-ntpdig git \
     usbutils pciutils htop openssh-server build-essential autotools-dev \
     meson libglib2.0-dev libjson-c-dev libgpiod-dev libusb-1.0-0-dev gdb \
-    p7zip-full net-tools iotop wget firmware-linux-free firmware-linux-nonfree \
-    firmware-misc-nonfree firmware-atheros firmware-iwlwifi firmware-brcm80211 \
+    p7zip-full net-tools iotop wget firmware-linux-free \
+    firmware-atheros \
     bridge-utils systemd-zram-generator linux-libc-dev \
     curl rsync file zip unzip dnsutils iputils-ping lsof strace tcpdump vim
 
@@ -217,17 +286,8 @@ EOF
     umount -l "${ROOTFS_MINIMAL_DIR}/dev" 2>/dev/null || true
     umount -l "${ROOTFS_MINIMAL_DIR}/proc" 2>/dev/null || true
 
-    # 打包前从宿主机侧强制清理敏感数据（ssh 私钥 / machine-id），不依赖 chroot heredoc 是否生效
-    rm -f "${ROOTFS_MINIMAL_DIR}"/etc/ssh/ssh_host_* \
-          "${ROOTFS_MINIMAL_DIR}"/etc/machine-id \
-          "${ROOTFS_MINIMAL_DIR}"/var/lib/dbus/machine-id
-    # 显式核验：打包前若仍存在则拒绝打包，避免静默打包出带敏感数据的镜像
-    if compgen -G "${ROOTFS_MINIMAL_DIR}/etc/ssh/ssh_host_*" >/dev/null 2>&1 \
-       || [ -e "${ROOTFS_MINIMAL_DIR}/etc/machine-id" ] \
-       || [ -e "${ROOTFS_MINIMAL_DIR}/var/lib/dbus/machine-id" ]; then
-        echo "错误：打包 ${ROOTFS_MINIMAL_ARCHIVE} 前仍存在 ssh 主机私钥或 machine-id，已终止打包" >&2
-        exit 1
-    fi
+    # 打包前从宿主机侧统一执行全面缓存清理 + 显式核验（不依赖 chroot heredoc 是否生效）
+    cleanup_rootfs_caches "${ROOTFS_MINIMAL_DIR}" "${ROOTFS_MINIMAL_ARCHIVE}"
 
     tar --xform s:'^./':: -czpf "${ROOTFS_MINIMAL_ARCHIVE}" --exclude="proc/*" --exclude="dev/*" --exclude="sys/*" --exclude="run/*" --xattrs -C "${ROOTFS_MINIMAL_DIR}" .
     echo "rootfs-minimal building completed."
@@ -291,17 +351,8 @@ EOF
     umount -l "${ROOTFS_CUSTOM_DIR}/dev" 2>/dev/null || true
     umount -l "${ROOTFS_CUSTOM_DIR}/proc" 2>/dev/null || true
 
-    # 打包前从宿主机侧强制清理敏感数据（ssh 私钥 / machine-id），不依赖 chroot heredoc 是否生效
-    rm -f "${ROOTFS_CUSTOM_DIR}"/etc/ssh/ssh_host_* \
-          "${ROOTFS_CUSTOM_DIR}"/etc/machine-id \
-          "${ROOTFS_CUSTOM_DIR}"/var/lib/dbus/machine-id
-    # 显式核验：打包前若仍存在则拒绝打包，避免静默打包出带敏感数据的镜像
-    if compgen -G "${ROOTFS_CUSTOM_DIR}/etc/ssh/ssh_host_*" >/dev/null 2>&1 \
-       || [ -e "${ROOTFS_CUSTOM_DIR}/etc/machine-id" ] \
-       || [ -e "${ROOTFS_CUSTOM_DIR}/var/lib/dbus/machine-id" ]; then
-        echo "错误：打包 ${ROOTFS_CUSTOM_ARCHIVE} 前仍存在 ssh 主机私钥或 machine-id，已终止打包" >&2
-        exit 1
-    fi
+    # 打包前从宿主机侧统一执行全面缓存清理 + 显式核验（不依赖 chroot heredoc 是否生效）
+    cleanup_rootfs_caches "${ROOTFS_CUSTOM_DIR}" "${ROOTFS_CUSTOM_ARCHIVE}"
 
     tar --xform s:'^./':: -czpf "${ROOTFS_CUSTOM_ARCHIVE}" --exclude="proc/*" --exclude="dev/*" --exclude="sys/*" --exclude="run/*" --xattrs -C "${ROOTFS_CUSTOM_DIR}" .
     echo "rootfs-custom building completed."
@@ -373,17 +424,8 @@ EOF
     umount -l "${ROOTFS_FULL_DIR}/dev" 2>/dev/null || true
     umount -l "${ROOTFS_FULL_DIR}/proc" 2>/dev/null || true
 
-    # 打包前从宿主机侧强制清理敏感数据（ssh 私钥 / machine-id），不依赖 chroot heredoc 是否生效
-    rm -f "${ROOTFS_FULL_DIR}"/etc/ssh/ssh_host_* \
-          "${ROOTFS_FULL_DIR}"/etc/machine-id \
-          "${ROOTFS_FULL_DIR}"/var/lib/dbus/machine-id
-    # 显式核验：打包前若仍存在则拒绝打包，避免静默打包出带敏感数据的镜像
-    if compgen -G "${ROOTFS_FULL_DIR}/etc/ssh/ssh_host_*" >/dev/null 2>&1 \
-       || [ -e "${ROOTFS_FULL_DIR}/etc/machine-id" ] \
-       || [ -e "${ROOTFS_FULL_DIR}/var/lib/dbus/machine-id" ]; then
-        echo "错误：打包 ${ROOTFS_FULL_ARCHIVE} 前仍存在 ssh 主机私钥或 machine-id，已终止打包" >&2
-        exit 1
-    fi
+    # 打包前从宿主机侧统一执行全面缓存清理 + 显式核验（不依赖 chroot heredoc 是否生效）
+    cleanup_rootfs_caches "${ROOTFS_FULL_DIR}" "${ROOTFS_FULL_ARCHIVE}"
 
     tar --xform s:'^./':: -czpf "${ROOTFS_FULL_ARCHIVE}" --exclude="proc/*" --exclude="dev/*" --exclude="sys/*" --exclude="run/*" --xattrs -C "${ROOTFS_FULL_DIR}" .
     echo "rootfs-full building completed."

@@ -1,20 +1,39 @@
---- a/drivers/net/phy/motorcomm.c	2023-02-17 13:36:03.204561624 +0900
-+++ b/drivers/net/phy/motorcomm.c	2023-02-20 15:28:08.842903184 +0900
-@@ -229,6 +229,13 @@
- #define YT8531_SYNCE_CFG_REG			0xA012
- #define YT8531_SCR_SYNCE_ENABLE			BIT(6)
+From 1e7301f8f2a4fd10e996f8e1cae4ee6b95b6a9b1 Mon Sep 17 00:00:00 2001
+From: David Bauer <mail@david-bauer.net>
+Date: Mon, 20 Feb 2023 15:28:00 +0900
+Subject: [PATCH] net: phy: motorcomm: set LED mode for YT8521
+
+Rewritten for 6.12.103: motorcomm.c has been extended/rewritten since the
+6.1 baseline, so the YT8521 LED register macros are now inserted after the
+YT8821 extended-register block (before "/* Extended Register  end */"), and
+yt8521_led_init() is placed before yt8521_config_init() which gained offset
+relative to the older tree. The LED configuration call is preserved in
+yt8521_config_init() (only for the UTP page path).
+
+Set the LED mode of the YT8521 so the LEDs reflect link/activity state.
+
+Signed-off-by: David Bauer <mail@david-bauer.net>
+---
+ drivers/net/phy/motorcomm.c | 17 +++++++++++++++++
+ 1 file changed, 17 insertions(+)
+
+--- a/drivers/net/phy/motorcomm.c
++++ b/drivers/net/phy/motorcomm.c
+@@ -344,6 +344,13 @@
  
-+#define YT8521_EXTREG_LED_GENERAL_CFG		0xA00B
-+#define YT8521_EXTREG_LED0_CFG			0xA00C
-+#define YT8521_EXTREG_LED1_CFG			0xA00D
-+#define YT8521_EXTREG_LED2_CFG			0xA00E
-+#define YT8521_EXTREG_LED_BLINK_CFG		0xA00F
+ #define YT8821_UTP_EXT_TXGE_NFR_FR_THP_CTRL_REG		0x660
+ #define YT8821_UTP_EXT_NFR_TX_ABILITY			BIT(3)
 +
++#define YT8521_EXTREG_LED_GENERAL_CFG			0xA00B
++#define YT8521_EXTREG_LED0_CFG				0xA00C
++#define YT8521_EXTREG_LED1_CFG				0xA00D
++#define YT8521_EXTREG_LED2_CFG				0xA00E
++#define YT8521_EXTREG_LED_BLINK_CFG			0xA00F
 +
  /* Extended Register  end */
  
- struct yt8521_priv {
-@@ -1213,6 +1220,20 @@
+ #define YTPHY_DTS_OUTPUT_CLK_DIS		0
+@@ -1639,6 +1646,20 @@
  	return yt8521_modify_utp_fiber_bmcr(phydev, BMCR_PDOWN, 0);
  }
  
@@ -22,10 +41,10 @@
 +{
 +	int ret;
 +	u16 val;
-+	
++
 +	val = (0x7 << 4);
 +	ret = ytphy_write_ext(phydev, YT8521_EXTREG_LED2_CFG, val);
-+	
++
 +	val = 0x7;
 +	ret = ytphy_write_ext(phydev, YT8521_EXTREG_LED1_CFG, val);
 +
@@ -35,12 +54,15 @@
  /**
   * yt8521_config_init() - called to initialize the PHY
   * @phydev: a pointer to a &struct phy_device
-@@ -1276,6 +1297,8 @@
- 	if (ret < 0)
- 		goto err_restore_page;
- 
+@@ -1677,6 +1698,9 @@
+ 		if (ret < 0)
+ 			goto err_restore_page;
+ 	}
++
 +	yt8521_led_init(phydev);
 +
  err_restore_page:
  	return phy_restore_page(phydev, old_page, ret);
  }
+ 
+-- 

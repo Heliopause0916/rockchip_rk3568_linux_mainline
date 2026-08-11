@@ -751,7 +751,7 @@ static size_t pcat_pm_uart_receive_parse(struct pcat_pm_data *pm_data,
 	return used_size;
 }
 
-static int pcat_pm_uart_serdev_receive_buf(
+static size_t pcat_pm_uart_serdev_receive_buf(
 	struct serdev_device *serdev, const u8 *buf, size_t count)
 {
 	struct pcat_pm_data *pm_data = serdev_device_get_drvdata(serdev);

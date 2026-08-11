@@ -1,8 +1,16 @@
+# =============================================================================
+# 993-add-rfkill-gpio-neo-driver.patch
+# Neo GPIO RFKILL driver (net/rfkill/rfkill-gpio-neo.c)
+# Rewritten for 6.12.103
+#   - add #include <linux/property.h>, <linux/of.h>
+#   - rfkill_gpio_neo_remove(): int -> void (6.12 platform_driver .remove signature)
+#   - verified: rfkill_alloc/register/unregister/destroy, gpiod_*, device_property_*
+#     signatures all match 6.12
+# =============================================================================
 diff --git a/net/rfkill/Kconfig b/net/rfkill/Kconfig
-index 83a7af898..b92e702d1 100644
 --- a/net/rfkill/Kconfig
 +++ b/net/rfkill/Kconfig
-@@ -32,3 +32,12 @@ config RFKILL_GPIO
+@@ -32,3 +32,12 @@
  	help
  	  If you say yes here you get support of a generic gpio RFKILL
  	  driver.
@@ -16,10 +24,9 @@ index 83a7af898..b92e702d1 100644
 +	  If you say yes here you get support of a new generic gpio RFKILL
 +	  driver.
 diff --git a/net/rfkill/Makefile b/net/rfkill/Makefile
-index dc47b6174..680302e72 100644
 --- a/net/rfkill/Makefile
 +++ b/net/rfkill/Makefile
-@@ -7,3 +7,5 @@ rfkill-y			+= core.o
+@@ -7,3 +7,5 @@
  rfkill-$(CONFIG_RFKILL_INPUT)	+= input.o
  obj-$(CONFIG_RFKILL)		+= rfkill.o
  obj-$(CONFIG_RFKILL_GPIO)	+= rfkill-gpio.o
@@ -27,7 +34,6 @@ index dc47b6174..680302e72 100644
 +obj-$(CONFIG_RFKILL_GPIO_NEO)	+= rfkill-gpio-neo.o
 diff --git a/net/rfkill/rfkill-gpio-neo.c b/net/rfkill/rfkill-gpio-neo.c
 new file mode 100644
-index 000000000..745e417e6
 --- /dev/null
 +++ b/net/rfkill/rfkill-gpio-neo.c
 @@ -0,0 +1,225 @@
@@ -46,6 +52,8 @@ index 000000000..745e417e6
 +#include <linux/slab.h>
 +#include <linux/gpio/consumer.h>
 +#include <linux/of_platform.h>
++#include <linux/of.h>
++#include <linux/property.h>
 +#include <linux/delay.h>
 +#include <linux/kthread.h>
 +
@@ -216,7 +224,7 @@ index 000000000..745e417e6
 +	return ret;
 +}
 +
-+static int rfkill_gpio_neo_remove(struct platform_device *pdev)
++static void rfkill_gpio_neo_remove(struct platform_device *pdev)
 +{
 +	struct rfkill_gpio_neo_data *rfkill = platform_get_drvdata(pdev);
 +
@@ -228,8 +236,6 @@ index 000000000..745e417e6
 +
 +	rfkill_unregister(rfkill->rfkill_dev);
 +	rfkill_destroy(rfkill->rfkill_dev);
-+
-+	return 0;
 +}
 +
 +#ifdef CONFIG_OF

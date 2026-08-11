@@ -3,43 +3,47 @@ From: Tianling Shen <cnsztl@immortalwrt.org>
 Date: Mon, 18 Oct 2021 12:47:30 +0800
 Subject: [PATCH] rockchip: rk3399: overclock to 2.2/1.8 GHz
 
+Rewritten for 6.12.103: the cluster OPP tables now live in rk3399.dtsi
+(cluster0_opp up to opp05=1416MHz, cluster1_opp up to opp07=1800MHz),
+so the overclock entries are appended there instead of rk3399-opp.dtsi.
+
 It's stable enough to overclock cpu frequency to 2.2/1.8 GHz,
 and for better performance.
 
 Co-development-by: gzelvis <gzelvis@gmail.com>
 Signed-off-by: Tianling Shen <cnsztl@immortalwrt.org>
 ---
- arch/arm64/boot/dts/rockchip/rk3399-opp.dtsi | 16 ++++++++++++++++
+ arch/arm64/boot/dts/rockchip/rk3399.dtsi | 16 ++++++++++++++++
  1 file changed, 16 insertions(+)
 
---- a/arch/arm64/boot/dts/rockchip/rk3399-opp.dtsi
-+++ b/arch/arm64/boot/dts/rockchip/rk3399-opp.dtsi
-@@ -33,6 +33,14 @@
+--- a/arch/arm64/boot/dts/rockchip/rk3399.dtsi
++++ b/arch/arm64/boot/dts/rockchip/rk3399.dtsi
+@@ -35,6 +35,14 @@
  			opp-hz = /bits/ 64 <1416000000>;
  			opp-microvolt = <1125000 1125000 1250000>;
  		};
 +		opp06 {
 +			opp-hz = /bits/ 64 <1608000000>;
-+			opp-microvolt = <1225000>;
++			opp-microvolt = <1225000 1225000 1225000>;
 +		};
 +		opp07 {
 +			opp-hz = /bits/ 64 <1800000000>;
-+			opp-microvolt = <1275000>;
++			opp-microvolt = <1275000 1275000 1275000>;
 +		};
  	};
  
  	cluster1_opp: opp-table-1 {
-@@ -72,6 +80,14 @@
+@@ -74,6 +82,14 @@
  			opp-hz = /bits/ 64 <1800000000>;
  			opp-microvolt = <1200000 1200000 1250000>;
  		};
 +		opp08 {
 +			opp-hz = /bits/ 64 <2016000000>;
-+			opp-microvolt = <1250000>;
++			opp-microvolt = <1250000 1250000 1250000>;
 +		};
 +		opp09 {
 +			opp-hz = /bits/ 64 <2208000000>;
-+			opp-microvolt = <1325000>;
++			opp-microvolt = <1325000 1325000 1325000>;
 +		};
  	};
  

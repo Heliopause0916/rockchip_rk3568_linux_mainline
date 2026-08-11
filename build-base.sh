@@ -5,7 +5,7 @@ mkdir -p archives
 WORKDIR="$(pwd)"
 
 UBOOT_VERSION="u-boot-2023.04"
-KERNEL_VERSION="linux-6.1.106"
+KERNEL_VERSION="linux-6.12.103"
 
 UBOOT_ARCHIVE="${UBOOT_VERSION}.tar.bz2"
 KERNEL_ARCHIVE="${KERNEL_VERSION}.tar.xz"
