@@ -2,6 +2,7 @@
 
 > 纯调研/规划文档。范围：主线上游 6.12.103 对内 RK3568 gmac0（fe2a0000）SGMII（eth1）的支持现状、根因、可选方案与推荐路线。
 > 本任务仅做只读调研，不涉及任何文件修改/编译/写操作。
+> 状态（2026-08-11）✅ 已实施完成：推荐的路线乙（上游 Coia Prant RK3568 XPCS v2 系列）已回移到 6.12.103 并上板验收（eth1 gmac0/SGMII 恢复满速）。研究结论与方案比对见正文，落地结果见文末「实施完成结论」章节。
 
 ---
 
@@ -241,3 +242,35 @@
 2. 与 6.12 树比对 API 差异：stmmac_mdio.c 的 XPCS 创建点、pcs-xpcs.c 接口、确认 6.12 是否有 Serge Semin 的 `net: pcs: xpcs: add xpcs-plat` 基础。
 3. 落地文件：`drivers/net/pcs/pcs-xpcs-rk.c`（07）、`dwmac-rk.c` SGMII 接插（08）、`rk3568-photonicat.dts`（09）。
 4. BSP 寄存器对照：rockchip-linux/kernel `develop-6.1` 分支 dwmac-rk.c + phy-rockchip-naneng-combphy.c。
+
+---
+
+## 2026-08-11 实施完成结论（路线乙已回移 6.12.103 并上板验证）
+
+> 本专项已实施完成并关闭。推荐的路线乙（上游 Coia Prant「net-next: add basic support for RK3568 XPCS」v2 系列）已成功回移，eth1（gmac0/SGMII）恢复且满速验收。正文的方案比对、寄存器蓝本与路线结论仍具参考价值；本节为落地收尾记录。
+
+### 落地补丁（patches/kernel/116..121，均为本专项新增）
+- 116 `pcs-xpcs-rk3568-driver.patch`：新驱动 `pcs-xpcs-rk.c` + `CONFIG_PCS_XPCS_ROCKCHIP`（在 XPCS APB3 块上虚拟 MDIO + 地址重映射，PCS 配置交给通用 `pcs-xpcs.c` 核心）
+- 117 `pcs-xpcs-sgmii-anrestart.patch`：SGMII ANRESTART（BMCR_ANRESTART）
+- 118 `dwmac-rk-sgmii-support.patch`：dwmac-rk SGMII 支持 + `select PCS_XPCS_ROCKCHIP`
+- 119 `rk3568-combphy-sgmii-mac-sel.patch`：combphy2 SGMII mac-sel
+- 120 `rk3568-dtsi-xpcs-node.patch`：rk3568.dtsi 加 xpcs / xpcs_mii0 / pclk 等节点
+- 121 `stmmac-pcs-lifetime-keep-pcs-init-xpcs.patch`（**关键修复**）：见下
+
+### overlay（photonicat.dts / ex1.dts）
+- gmac0 加 `pcs-handle=<&xpcs_mii0>` + `managed="in-band-status"`
+- serdes phys（combphy2）移到 `&xpcs`（`phy-names="serdes"`），避免同一 serdes PHY 被双消费者重复请求
+- `&xpcs_mii0 status=okay`；`&combphy2 rockchip,sgmii-mac-sel=<0>`（GMAC0）
+
+### 上板调试定位的关键根因（供后续内核升级核对）
+- 6.12 的 `stmmac_pcs_setup()`（stmmac_mdio.c）调用 `priv->plat->pcs_init()`（rk_pcs_init 已把 XPCS 写入 `priv->hw->xpcs`）之后仍执行 `priv->hw->xpcs = xpcs;`，而局部 `xpcs` 在该分支为 NULL，把平台 attach 的 XPCS 覆盖成 NULL → `rk_select_pcs` 返回 NULL → phylink 从不挂 PCS → `xpcs_config_aneg_c37_sgmii`（SGMII in-band AN）从不执行。对应上游 01.patch 的修复语义，由补丁 121 落实（走 pcs_init 分支后就地 return）。
+- YT8521 的 SGMII/RGMII 接口模式由硬件 strap 决定（motorcomm 驱动只在 probe 读 `CHIP_CONFIG_REG 0xA001` bit[2:0]，从不写寄存器切换），**非 PHY 侧问题**；6.12 mainline motorcomm 已完整支持 YT8521 SGMII，无需额外补丁。
+- 该缺陷的症状特征：probe / PHY 识别 / 铜缆 AN 均正常（能看到 Link partner、Speed 1000/Full），但 eth1 carrier 永远 down、MAC 从 SGMII 收 0 帧（`mmc_rx_framecount_gb=0`、`rx_crc_errors=0`，`ethtool -S` 两次无增长）。
+
+### 验收（2026-08-11 上板实测）
+- `Link detected: yes`、`Speed: 1000Mb/s`、`Duplex: Full`，dmesg `eth1: Link is Up - 1Gbps/Full - flow control off`。
+- iperf3 eth1 双向 ~940 Mbit/s，与 eth0（gmac1 RGMII）同档满速；eth1/eth0 同网段可同时在线。
+- 不再出现 `unsupported interface 4` / `NO interface defined!` / `DMA engine initialization failed`。
+
+### 状态
+- ✅ 实施完成，本专项关闭。后续若推进阶段三（内核版本整体升级），按「关键根因」章节核对 116–121 中哪些已并入主线可删除、哪些需重做，重点复核 121 的 stmmac PCS 生命周期逻辑在新内核中的形态。

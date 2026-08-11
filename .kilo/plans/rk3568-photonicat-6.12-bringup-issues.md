@@ -3,7 +3,7 @@
 - 日期：2026-08-11
 - 内核：linux-6.12.103（photonicat_defconfig）
 - 板型：Photonicat（RK3568，debian trixie rootfs）
-- 状态：6.12 升级后首次上板，eth0 正常，其余问题如下
+- 状态：6.12.103 升级 bring-up，eth0 与 eth1（gmac0/SGMII）均已恢复且满速，其余问题如下
 
 > 说明：本清单记录升级到主线 6.12 后暴露的全部硬件驱动问题，区分内核侧 / rootfs 侧 / 系统侧。每项含现象（dmesg 证据）、根因、影响、处置建议、状态。
 
@@ -11,7 +11,7 @@
 
 | # | 问题 | 类别 | 严重度 | 状态 |
 |---|---|---|---|---|
-| 1 | eth1（gmac0/SGMII）无法启动 | 内核 | 高 | 待移植 PCS（见 SGMII 专项） |
+| 1 | eth1（gmac0/SGMII）无法启动 | 内核 | 高 | ✅ 已解决（2026-08-11，补丁 116–121 上板验证） |
 | 2 | WiFi（ath10k QCA9377） | rootfs | 高 | 已验收正常（2026-08-11 上板实测） |
 | 3 | PCIe combphy 上电锁失败 | 内核 | 中 | 待确认是否使用 |
 | 4 | Bluetooth hci0 帧重组失败 | 内核/固件 | 低 | 待观察 |
@@ -24,12 +24,20 @@
 
 ## 详细
 
-### 1. eth1（gmac0 / SGMII）无法启动（高，内核）
-- 现象：`rk_gmac-dwmac fe2a0000.ethernet: unsupported interface 4`、`NO interface defined!`、打开时 `eth1: stmmac_hw_setup: DMA engine initialization failed`、`__stmmac_open: Hw setup failed`。ip link 显示 eth1 DOWN。
-- 根因：gmac0（fe2a0000）在设备树声明 `phy-mode="sgmii"`（接口 4=SGMII），但**主线上游 6.12 的 dwmac-rk 无 SGMII PCS 驱动**（上游对 RK3568/RK3588 均无线 PCS 支持），`stmmac_mac_select_pcs()` 返回 NULL → SGMII 通路无法建立。
-- 影响：第二个千兆口不可用。用户期望后期 eth0 与 eth1 都用（当前仅 eth0 接一根线）。
-- 处置：移植 6.1 BSP 的 SGMII/XPCS PCS 支持到 6.12（独立专项，见 `.kilo/plans/1786453731168-rk3568-gmac0-sgmii-restore-plan.md`），需另编内核并上板实测。
-- 状态：待移植。
+### 1. eth1（gmac0 / SGMII）无法启动（高，内核）✅ 已解决
+- 现象（修复前）：`rk_gmac-dwmac fe2a0000.ethernet: unsupported interface 4`、`NO interface defined!`、打开时 `eth1: stmmac_hw_setup: DMA engine initialization failed`、`__stmmac_open: Hw setup failed`，ip link 显示 eth1 DOWN。
+- 根因：gmac0（fe2a0000）在 DT 声明 `phy-mode="sgmii"`（接口 4=SGMII），但主线 6.12 的 dwmac-rk 无 SGMII PCS 驱动，`stmmac_mac_select_pcs()` 返回 NULL → SGMII 通路无法建立。
+- 解决：移植上游 RK3568 XPCS v2 系列（patchwork series 1138639）为 `patches/kernel/116..121`：
+  - 116 pcs-xpcs-rk 驱动（新 pcs-xpcs-rk.c + CONFIG_PCS_XPCS_ROCKCHIP）
+  - 117 SGMII ANRESTART（BMCR_ANRESTART）
+  - 118 dwmac-rk SGMII 支持（select PCS_XPCS_ROCKCHIP）
+  - 119 combphy2 SGMII mac-sel
+  - 120 rk3568.dtsi xpcs 节点
+  - 121 **stmmac PCS 生命周期修复（关键）**：6.12 `stmmac_pcs_setup()` 调用 `priv->plat->pcs_init()`（rk_pcs_init 已把 XPCS 写入 `priv->hw->xpcs`）后仍执行 `priv->hw->xpcs = xpcs;`，而局部 `xpcs` 在 pcs_init 分支为 NULL，把平台 attach 的 XPCS 覆盖成 NULL → `rk_select_pcs` 返回 NULL → phylink 从不挂 PCS → `xpcs_config_aneg_c37_sgmii`（SGMII in-band AN）从不执行。修复：走 pcs_init 分支后就地 return。
+  - overlay（photonicat.dts / ex1.dts）：gmac0 加 `pcs-handle=<&xpcs_mii0>` + `managed="in-band-status"`；serdes phys（combphy2）移到 `&xpcs`（`phy-names="serdes"`）避免双消费者；`&xpcs_mii0 status=okay`；`&combphy2 rockchip,sgmii-mac-sel=<0>`。
+- 验收（2026-08-11 上板实测）：`Link detected: yes`、`Speed: 1000Mb/s`、`Duplex: Full`、dmesg `eth1: Link is Up - 1Gbps/Full`；iperf3 eth1 双向 ~940 Mbit/s，与 eth0（RGMII）同档满速；eth0 与 eth1 同网段可同时在线。
+- 参考：YT8521 的 RGMII/SGMII 模式由硬件 strap 决定，驱动（motorcomm.c）读取不切换；6.12 mainline motorcomm 已完整支持 YT8521 SGMII，无需额外补丁。
+- 状态：已解决。
 
 ### 2. WiFi（ath10k QCA9377）（高，rootfs）✅ 已解决
 - 现象（旧）：`ath10k_sdio ... failed to fetch board data for bus=sdio,vendor=0271,device=0701,... from ath10k/QCA9377/hw1.0/board-2.bin`，曾误判为缺固件。
@@ -94,4 +102,5 @@
 - photonic-pm 内核 serdev 通道：`/dev/pcat-pm-ctl` 存在、`/dev/ttyS4` 消失（v1 互斥符合预期）、pcat-manager kernel(ctl) 模式、Modem power on 成功、PMU FW RA2E1230523000、RTC 回读播种。
 - 原生 rng：rng_current=rockchip-rng，`/dev/hwrng` 可读。
 - eth0（gmac1 RGMII + YT8521）：1 Gbps Full，Link detected。
+- eth1（gmac0 SGMII + YT8521 + combphy2）：1 Gbps Full，Link detected，iperf3 ~940 Mbit/s；eth1 与 eth0 同网段可同时在线。
 - option/usbserial：ttyUSB0-3 调制解调器检测正常；rfkill_gpio_neo 已加载；ath10k_sdio 模块已加载（缺固件具体见 #2）。
