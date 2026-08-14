@@ -6,6 +6,8 @@ After=syslog.target
 #ExecStartPre=
 ExecStart=/usr/local/bin/pcat-manager --distro
 ExecReload=/bin/kill -HUP $MAINPID
+ExecStop=/bin/kill -USR1 $MAINPID
+KillSignal=SIGTERM
 Restart = always
 Type = simple
 
