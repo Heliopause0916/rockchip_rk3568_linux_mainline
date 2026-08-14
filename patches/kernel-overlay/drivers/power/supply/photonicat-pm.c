@@ -81,8 +81,6 @@ static enum power_supply_property pcat_pm_battery_v1_properties[] = {
 	POWER_SUPPLY_PROP_STATUS,
 	POWER_SUPPLY_PROP_CAPACITY,
 	POWER_SUPPLY_PROP_VOLTAGE_NOW,
-	POWER_SUPPLY_PROP_CURRENT_NOW,
-	POWER_SUPPLY_PROP_POWER_NOW,
 	POWER_SUPPLY_PROP_TECHNOLOGY,
 	POWER_SUPPLY_PROP_VOLTAGE_MIN_DESIGN,
 	POWER_SUPPLY_PROP_VOLTAGE_MAX_DESIGN,
@@ -503,12 +501,13 @@ static void pcat_pm_status_report_parse(struct pcat_pm_data *pm_data,
 	gpio_input = data[4] | ((u16)data[5] << 8);
 	gpio_output = data[6] | ((u16)data[7] << 8);
 
-	if (data_len >= 18) {
+	if (data_len >= 18)
 		temp = (int)data[17] - 40;
+
+	if (data_len >= 20) {
 		battery_current_raw = data[18] + ((u16)data[19] << 8);
 		battery_current = (s16)battery_current_raw;
 		on_battery = (battery_current > 0);
-		
 	} else {
 		on_battery = (charger_voltage < 4200);
 	}
