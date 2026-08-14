@@ -1238,3 +1238,10 @@ CONFIG_DEBUG_PREEMPT=y
 CONFIG_RCU_CPU_STALL_TIMEOUT=60
 # CONFIG_UPROBE_EVENTS is not set
 # CONFIG_RUNTIME_TESTING_MENU is not set
+# Enable per-task I/O accounting for htop DISK R/W (/proc/<pid>/io)
+CONFIG_TASKSTATS=y
+CONFIG_TASK_XACCT=y
+CONFIG_TASK_IO_ACCOUNTING=y
+# Per-task delay accounting + blktrace block IO tracing
+CONFIG_TASK_DELAY_ACCT=y
+CONFIG_BLK_DEV_IO_TRACE=y
