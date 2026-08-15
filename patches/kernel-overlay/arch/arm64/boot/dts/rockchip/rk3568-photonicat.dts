@@ -367,6 +367,12 @@
 	status = "okay";
 };
 
+/* Enable NPU in non-IOMMU mode (first release); do not attach &rknpu_mmu
+ * to rknpu->iommus and do not enable &rknpu_mmu. */
+&rknpu {
+	status = "okay";
+};
+
 &hdmi {
 	avdd-0v9-supply = <&vdda_0v9>;
 	avdd-1v8-supply = <&vcca_1v8>;

@@ -6,6 +6,13 @@ PREINSTALL_PACKAGES="nano,build-essential"
 OVERLAY_DIR="overlay-ubuntu"
 SOURCES_LIST_FILE="sources.list.ubuntu"
 
+# RKNN(NPU) 闭源运行时素材目录：librknnrt.so 为闭源二进制，不能 git 入 GPL 仓库。
+# 由用户在构建时通过环境变量 RKNN_ASSET_DIR 提供，目录结构约定：
+#   ${RKNN_ASSET_DIR}/aarch64/librknnrt.so
+#   ${RKNN_ASSET_DIR}/include/*.h   (rknn_api.h、rknn_matmul_api.h 等)
+# 为空或缺少 aarch64/include 子目录时，跳过 NPU 安装并打印警告，不阻塞其余构建。
+RKNN_ASSET_DIR="${RKNN_ASSET_DIR:-}"
+
 ROOTFS_DIR="rootfs-ubuntu"
 ROOTFS_BASE_ARCHIVE="rootfs-ubuntu-base.tar.gz"
 
@@ -51,6 +58,18 @@ if [ ! -f "${ROOTFS_MINIMAL_ARCHIVE}" ]; then
 
     if [ -d "${OVERLAY_DIR}" ]; then
         cp -rf "${OVERLAY_DIR}/." "${ROOTFS_MINIMAL_DIR}/"
+    fi
+
+    # 暂存 RKNN 闭源运行时到 chroot 目录（chroot 内无法访问宿主机 ${RKNN_ASSET_DIR}，
+    # 故先在宿主机侧拷入暂存，再由下方 heredoc 段 install 到最终位置并清理）
+    if [ -n "${RKNN_ASSET_DIR}" ] && [ -d "${RKNN_ASSET_DIR}/aarch64" ] && [ -d "${RKNN_ASSET_DIR}/include" ]; then
+        echo "准备 RKNN 闭源运行时（librknnrt.so）+ 头文件到 chroot 暂存：${RKNN_ASSET_DIR}"
+        rm -rf "${ROOTFS_MINIMAL_DIR}/opt/rknn-asset"
+        mkdir -p "${ROOTFS_MINIMAL_DIR}/opt/rknn-asset/aarch64" "${ROOTFS_MINIMAL_DIR}/opt/rknn-asset/include"
+        cp -f "${RKNN_ASSET_DIR}/aarch64/librknnrt.so" "${ROOTFS_MINIMAL_DIR}/opt/rknn-asset/aarch64/"
+        cp -rf "${RKNN_ASSET_DIR}/include"/. "${ROOTFS_MINIMAL_DIR}/opt/rknn-asset/include/"
+    else
+        echo "警告：RKNN_ASSET_DIR 未设置或缺少 aarch64/include 子目录，跳过 NPU(RKNN) 运行时安装"
     fi
 
     cp -f "${SOURCES_LIST_FILE}" "${ROOTFS_MINIMAL_DIR}/etc/apt/sources.list"
@@ -104,6 +123,18 @@ apt-get install -fy sudo fakeroot devscripts cmake binfmt-support dh-make \
 apt-get clean
 
 usermod -a -G audio photonicat
+
+# 安装 RKNN 闭源运行时（仅当宿主机暂存了素材时执行；闭源 blob 由用户预下载、不入仓库）
+if [ -d /opt/rknn-asset ]; then
+    echo "安装 RKNN librknnrt.so 到 /usr/lib ..."
+    install -D -m 0644 /opt/rknn-asset/aarch64/librknnrt.so /usr/lib/librknnrt.so
+    mkdir -p /usr/include/rknn
+    install -m 0644 /opt/rknn-asset/include/*.h /usr/include/rknn/
+    echo "/usr/lib" > /etc/ld.so.conf.d/rknn.conf
+    ldconfig
+    usermod -a -G render photonicat || true
+    rm -rf /opt/rknn-asset
+fi
 
 rm -f /etc/resolv.conf
 ln -sf ../run/NetworkManager/resolv.conf /etc/resolv.conf

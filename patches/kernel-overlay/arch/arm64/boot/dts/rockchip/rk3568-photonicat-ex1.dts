@@ -346,6 +346,12 @@
 	status = "okay";
 };
 
+/* Enable NPU in non-IOMMU mode (first release); do not attach &rknpu_mmu
+ * to rknpu->iommus and do not enable &rknpu_mmu. */
+&rknpu {
+	status = "okay";
+};
+
 &hdmi {
 	status = "disabled";
 };
