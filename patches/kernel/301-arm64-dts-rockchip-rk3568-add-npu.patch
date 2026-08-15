@@ -16,7 +16,7 @@
  		};
  	};
  
-@@ -633,6 +642,30 @@
+@@ -633,6 +642,31 @@
  		power-domains = <&power RK3568_PD_GPU>;
  		status = "disabled";
  	};
@@ -24,6 +24,7 @@
 +		compatible = "rockchip,rk3568-rknpu", "rockchip,rknpu";
 +		reg = <0x0 0xfde40000 0x0 0x10000>;
 +		interrupts = <GIC_SPI 151 IRQ_TYPE_LEVEL_HIGH>;
++		interrupt-names = "npu_irq";
 +		clocks = <&cru CLK_NPU>, <&cru ACLK_NPU>, <&cru HCLK_NPU>;
 +		clock-names = "clk", "aclk", "hclk";
 +		assigned-clocks = <&cru CLK_NPU>;
