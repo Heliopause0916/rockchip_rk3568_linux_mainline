@@ -1,0 +1,19 @@
+rockchip: phy: snps-pcie3: increase SRAM init timeout to 20000us
+
+The RK3568 PCIe3 PHY SRAM init poll in rockchip_p3phy_rk3568_init uses a
+500us timeout, which can occasionally time out during startup, causing
+intermittent PCIe enumeration failure. Rockchip upstream confirmed 500us
+is too tight and recommends 20000us (fix not yet in 6.12 mainline, so
+this is a backport/port).
+
+--- a/drivers/phy/rockchip/phy-rockchip-snps-pcie3.c
++++ b/drivers/phy/rockchip/phy-rockchip-snps-pcie3.c
+@@ -127,7 +127,7 @@
+ 	ret = regmap_read_poll_timeout(priv->phy_grf,
+ 				       GRF_PCIE30PHY_STATUS0,
+ 				       reg, SRAM_INIT_DONE(reg),
+-				       0, 500);
++				       0, 20000);
+ 	if (ret)
+ 		dev_err(&priv->phy->dev, "%s: lock failed 0x%x, check input refclk and power supply\n",
+ 		       __func__, reg);
