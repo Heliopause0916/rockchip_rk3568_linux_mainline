@@ -1,10 +1,12 @@
 [Unit]
 Description=PCat Manager daemon
 After=syslog.target
+After=dev-pcat-pm-ctl.device
+Wants=dev-pcat-pm-ctl.device
 
 [Service]
 #ExecStartPre=
-ExecStart=/usr/local/bin/pcat-manager --distro
+ExecStart=/usr/local/bin/pcat-manager --distro --mode=kernel
 ExecReload=/bin/kill -HUP $MAINPID
 ExecStop=/bin/kill -USR1 $MAINPID
 KillSignal=SIGTERM
