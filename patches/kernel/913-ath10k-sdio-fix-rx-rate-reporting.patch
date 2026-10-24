@@ -1,0 +1,129 @@
+# =============================================================================
+# 913-ath10k-sdio-fix-rx-rate-reporting.patch
+# ath10k SDIO/HL receive path is missing rate parsing:
+#   ath10k_htt_rx_proc_rx_ind_hl() only fills signal/band/freq after
+#   memset(rx_status), so mac80211 reports RX_ENC_LEGACY with rate_idx=0
+#   (iw link shows 6.0 MBit/s) for all frames.
+# This patch adds a HL-specific rate parser ath10k_htt_rx_h_rates_hl() that
+# decodes legacy/HT/VHT rates from rx->ppdu (struct htt_rx_indication_ppdu)
+# info0/info1/info2 and calls it right after band/freq are filled in
+# ath10k_htt_rx_proc_rx_ind_hl().
+#   Note: ath10k_htt_rx_h_ppdu() cannot be reused - it depends on a
+#   PCIe-style htt_rx_desc which is not present at the skb front in the
+#   SDIO/HL path.
+#   Baseline: linux-6.12.103 (photonicat_defconfig).
+#   Reference: algorithm aligned with ath10k_htt_rx_h_rates() (PCIe path).
+# =============================================================================
+--- a/drivers/net/wireless/ath/ath10k/htt_rx.c
++++ b/drivers/net/wireless/ath/ath10k/htt_rx.c
+@@ -2452,6 +2452,102 @@
+ 	return pn_invalid;
+ }
+ 
++static void ath10k_htt_rx_h_rates_hl(struct ath10k *ar,
++				     struct ieee80211_rx_status *status,
++				     struct htt_rx_indication_ppdu *ppdu)
++{
++	struct ieee80211_supported_band *sband;
++	u8 cck, rate, bw, sgi, mcs, nss, preamble;
++	u32 info0, info1, info2, sig1, sig2;
++	u32 stbc, nsts_su, group_id;
++
++	if (!(ppdu->info0 & HTT_RX_INDICATION_INFO0_START_VALID))
++		return;
++
++	info0 = ppdu->info0;
++	info1 = __le32_to_cpu(ppdu->info1);
++	info2 = __le32_to_cpu(ppdu->info2);
++
++	preamble = MS(info1, HTT_RX_INDICATION_INFO1_PREAMBLE_TYPE);
++
++	switch (preamble) {
++	case HTT_RX_LEGACY:
++		/* To get legacy rate index band is required. Since band
++		 * can't be undefined check if freq is non-zero.
++		 */
++		if (!status->freq)
++			return;
++
++		cck = !!(info0 & HTT_RX_INDICATION_INFO0_LEGACY_RATE_CCK);
++		rate = MS(info0, HTT_RX_INDICATION_INFO0_LEGACY_RATE);
++		rate &= ~RX_PPDU_START_RATE_FLAG;
++
++		sband = &ar->mac.sbands[status->band];
++		status->rate_idx = ath10k_mac_hw_rate_to_idx(sband, rate, cck);
++		break;
++	case HTT_RX_HT:
++	case HTT_RX_HT_WITH_TXBF:
++		/* HT-SIG - Table 20-11 in info1 and info2 */
++		sig1 = info1 & HTT_RX_INDICATION_INFO1_VHT_SIG_A1_MASK;
++		sig2 = info2 & HTT_RX_INDICATION_INFO2_VHT_SIG_A1_MASK;
++
++		mcs = sig1 & 0x1F;
++		nss = mcs >> 3;
++		bw = (sig1 >> 7) & 1;
++		sgi = (sig2 >> 7) & 1;
++
++		status->rate_idx = mcs;
++		status->encoding = RX_ENC_HT;
++		if (sgi)
++			status->enc_flags |= RX_ENC_FLAG_SHORT_GI;
++		if (bw)
++			status->bw = RATE_INFO_BW_40;
++		break;
++	case HTT_RX_VHT:
++	case HTT_RX_VHT_WITH_TXBF:
++		/* VHT-SIG-A1 in info1, VHT-SIG-A2 in info2 */
++		sig1 = info1 & HTT_RX_INDICATION_INFO1_VHT_SIG_A1_MASK;
++		sig2 = info2 & HTT_RX_INDICATION_INFO2_VHT_SIG_A1_MASK;
++
++		bw = sig1 & 3;
++		sgi = sig2 & 1;
++		stbc = (sig1 >> 3) & 1;
++		group_id = (sig1 >> 4) & 0x3F;
++
++		if (GROUP_ID_IS_SU_MIMO(group_id)) {
++			mcs = (sig2 >> 4) & 0x0F;
++			nsts_su = (sig1 >> 10) & 0x07;
++			if (stbc)
++				nss = (nsts_su >> 2) + 1;
++			else
++				nss = nsts_su + 1;
++		} else {
++			/* Hardware doesn't decode VHT-SIG-B into Rx
++			 * descriptor so it's impossible to decode MCS.
++			 * Bandwidth and SGI are valid so report the
++			 * rateinfo on best-effort basis.
++			 */
++			mcs = 0;
++			nss = 1;
++		}
++
++		if (mcs > 0x09)
++			ath10k_warn(ar, "invalid MCS received %u\n", mcs);
++
++		status->rate_idx = mcs;
++		status->nss = nss;
++
++		if (sgi)
++			status->enc_flags |= RX_ENC_FLAG_SHORT_GI;
++
++		status->bw = ath10k_bw_to_mac80211_bw(bw);
++		status->encoding = RX_ENC_VHT;
++		break;
++	default:
++		break;
++	}
++}
++
+ static bool ath10k_htt_rx_proc_rx_ind_hl(struct ath10k_htt *htt,
+ 					 struct htt_rx_indication_hl *rx,
+ 					 struct sk_buff *skb,
+@@ -2579,6 +2675,7 @@
+ 		rx_status->band = ch->band;
+ 		rx_status->freq = ch->center_freq;
+ 	}
++	ath10k_htt_rx_h_rates_hl(ar, rx_status, &rx->ppdu);
+ 	if (rx->fw_desc.flags & FW_RX_DESC_FLAGS_LAST_MSDU)
+ 		rx_status->flag &= ~RX_FLAG_AMSDU_MORE;
+ 	else
